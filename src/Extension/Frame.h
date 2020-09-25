@@ -314,8 +314,13 @@ private:
 class FrameFromPtr : public Frame{
 public:
     typedef std::shared_ptr<FrameFromPtr> Ptr;
-    FrameFromPtr(CodecId codec_id, char *ptr, uint32_t size, uint32_t dts, uint32_t pts = 0, int prefix_size = 0){
+
+    FrameFromPtr(CodecId codec_id, char *ptr, uint32_t size, uint32_t dts, uint32_t pts = 0, int prefix_size = 0)
+            : FrameFromPtr(ptr, size, dts, pts, prefix_size) {
         _codec_id = codec_id;
+    }
+
+    FrameFromPtr(char *ptr, uint32_t size, uint32_t dts, uint32_t pts = 0, int prefix_size = 0){
         _ptr = ptr;
         _size = size;
         _dts = dts;
@@ -347,8 +352,15 @@ public:
         return false;
     }
 
-    CodecId getCodecId() const override{
+    CodecId getCodecId() const override {
+        if (_codec_id == CodecInvalid) {
+            throw std::invalid_argument("FrameFromPtr对象未设置codec类型");
+        }
         return _codec_id;
+    }
+
+    void setCodecId(CodecId codec_id) {
+        _codec_id = codec_id;
     }
 
     bool keyFrame() const override {
@@ -369,6 +381,50 @@ protected:
     uint32_t _pts = 0;
     uint32_t _prefix_size;
     CodecId _codec_id = CodecInvalid;
+};
+
+/**
+ * 该对象可以把Buffer对象转换成可缓存的Frame对象
+ */
+template <typename Parent>
+class FrameWrapper : public Parent{
+public:
+    ~FrameWrapper() = default;
+
+    /**
+     * 构造frame
+     * @param buf 数据缓存
+     * @param dts 解码时间戳
+     * @param pts 显示时间戳
+     * @param prefix 帧前缀长度
+     * @param offset buffer有效数据偏移量
+     */
+    FrameWrapper(const Buffer::Ptr &buf, int64_t dts, int64_t pts, int prefix, int offset) : Parent(buf->data() + offset, buf->size() - offset, dts, pts, prefix){
+        _buf = buf;
+    }
+
+    /**
+     * 构造frame
+     * @param buf 数据缓存
+     * @param dts 解码时间戳
+     * @param pts 显示时间戳
+     * @param prefix 帧前缀长度
+     * @param offset buffer有效数据偏移量
+     * @param codec 帧类型
+     */
+    FrameWrapper(const Buffer::Ptr &buf, int64_t dts, int64_t pts, int prefix, int offset, CodecId codec) : Parent(codec, buf->data() + offset, buf->size() - offset, dts, pts, prefix){
+        _buf = buf;
+    }
+
+    /**
+     * 该帧可缓存
+     */
+    bool cacheAble() const override {
+        return true;
+    }
+
+private:
+    Buffer::Ptr _buf;
 };
 
 }//namespace mediakit
