@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -15,14 +15,13 @@
 #include "Extension/Track.h"
 #include "Util/ResourcePool.h"
 #include "Extension/H265.h"
-using namespace toolkit;
 
 namespace mediakit{
 /**
  * h265 Rtmp解码类
  * 将 h265 over rtmp 解复用出 h265-Frame
  */
-class H265RtmpDecoder : public RtmpCodec ,public ResourcePoolHelper<H265Frame> {
+class H265RtmpDecoder : public RtmpCodec {
 public:
     typedef std::shared_ptr<H265RtmpDecoder> Ptr;
 
@@ -40,7 +39,7 @@ public:
     }
 
 protected:
-    void onGetH265(const char *pcData, int iLen, uint32_t dts,uint32_t pts);
+    void onGetH265(const char *pcData, size_t iLen, uint32_t dts,uint32_t pts);
     H265Frame::Ptr obtainFrame();
 
 protected:
@@ -50,7 +49,7 @@ protected:
 /**
  * 265 Rtmp打包类
  */
-class H265RtmpEncoder : public H265RtmpDecoder, public ResourcePoolHelper<RtmpPacket> {
+class H265RtmpEncoder : public H265RtmpDecoder{
 public:
     typedef std::shared_ptr<H265RtmpEncoder> Ptr;
 
@@ -67,21 +66,24 @@ public:
      * 输入265帧，可以不带sps pps
      * @param frame 帧数据
      */
-    void inputFrame(const Frame::Ptr &frame) override;
+    bool inputFrame(const Frame::Ptr &frame) override;
 
     /**
      * 生成config包
      */
     void makeConfigPacket() override;
+
 private:
     void makeVideoConfigPkt();
+
 private:
-    string _vps;
-    string _sps;
-    string _pps;
+    bool _got_config_frame = false;
+    std::string _vps;
+    std::string _sps;
+    std::string _pps;
     H265Track::Ptr _track;
-    bool _gotSpsPps = false;
-    RtmpPacket::Ptr _lastPacket;
+    RtmpPacket::Ptr _rtmp_packet;
+    FrameMerger _merger{FrameMerger::mp4_nal_size};
 };
 
 }//namespace mediakit

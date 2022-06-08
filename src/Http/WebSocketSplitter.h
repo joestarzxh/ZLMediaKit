@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -16,8 +16,6 @@
 #include <vector>
 #include <memory>
 #include "Network/Buffer.h"
-using namespace std;
-using namespace toolkit;
 
 //websocket组合包最大不得超过4MB(防止内存爆炸)
 #define MAX_WS_PACKET (4 * 1024 * 1024)
@@ -60,18 +58,18 @@ public:
     uint8_t _reserved;
     Type _opcode;
     bool _mask_flag;
-    uint64_t _payload_len;
-    vector<uint8_t > _mask;
+    size_t _payload_len;
+    std::vector<uint8_t > _mask;
 };
 
 //websocket协议收到的字符串类型缓存，用户协议层获取该数据传输的方式
-class WebSocketBuffer : public BufferString {
+class WebSocketBuffer : public toolkit::BufferString {
 public:
     typedef std::shared_ptr<WebSocketBuffer> Ptr;
 
     template<typename ...ARGS>
     WebSocketBuffer(WebSocketHeader::Type headType, bool fin, ARGS &&...args)
-            : _head_type(headType), _fin(fin), BufferString(std::forward<ARGS>(args)...) {}
+            :  toolkit::BufferString(std::forward<ARGS>(args)...), _fin(fin), _head_type(headType){}
 
     ~WebSocketBuffer() override {}
 
@@ -80,8 +78,8 @@ public:
     bool isFinished() const { return _fin; };
 
 private:
-    WebSocketHeader::Type _head_type;
     bool _fin;
+    WebSocketHeader::Type _head_type;
 };
 
 class WebSocketSplitter : public WebSocketHeader{
@@ -95,7 +93,7 @@ public:
      * @param data 需要解包的数据，可能是不完整的包或多个包
      * @param len 数据长度
      */
-    void decode(uint8_t *data,uint64_t len);
+    void decode(uint8_t *data, size_t len);
 
     /**
      * 编码一个数据包
@@ -103,7 +101,7 @@ public:
      * @param header 数据头
      * @param buffer 负载数据
      */
-    void encode(const WebSocketHeader &header,const Buffer::Ptr &buffer);
+    void encode(const WebSocketHeader &header,const toolkit::Buffer::Ptr &buffer);
 
 protected:
     /**
@@ -119,7 +117,7 @@ protected:
      * @param len 负载数据长度
      * @param recved 已接收数据长度(包含本次数据长度)，等于header._payload_len时则接受完毕
      */
-    virtual void onWebSocketDecodePayload(const WebSocketHeader &header, const uint8_t *ptr, uint64_t len, uint64_t recved) {};
+    virtual void onWebSocketDecodePayload(const WebSocketHeader &header, const uint8_t *ptr, size_t len, size_t recved) {};
 
     /**
      * 接收到完整的一个webSocket数据包后回调
@@ -132,16 +130,16 @@ protected:
      * @param ptr 数据指针
      * @param len 数据指针长度
      */
-    virtual void onWebSocketEncodeData(const Buffer::Ptr &buffer){};
+    virtual void onWebSocketEncodeData(toolkit::Buffer::Ptr buffer){};
 
 private:
-    void onPayloadData(uint8_t *data, uint64_t len);
+    void onPayloadData(uint8_t *data, size_t len);
 
 private:
-    string _remain_data;
-    int _mask_offset = 0;
     bool _got_header = false;
-    uint64_t _payload_offset = 0;
+    int _mask_offset = 0;
+    size_t _payload_offset = 0;
+    std::string _remain_data;
 };
 
 } /* namespace mediakit */

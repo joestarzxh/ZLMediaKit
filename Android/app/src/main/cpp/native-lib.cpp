@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -232,6 +232,7 @@ JNI_API(jlong,createMediaPlayer,jstring url,jobject callback){
         if (viedoTrack) {
             viedoTrack->addDelegate(std::make_shared<FrameWriterInterfaceHelper>([globalWeakRef](const Frame::Ptr &frame) {
                 emitEvent((jobject)globalWeakRef,"onData","(L" MediaFrameSign ";)V",makeJavaFrame(env,frame));
+                return true;
             }));
         }
 
@@ -239,6 +240,7 @@ JNI_API(jlong,createMediaPlayer,jstring url,jobject callback){
         if (audioTrack) {
             audioTrack->addDelegate(std::make_shared<FrameWriterInterfaceHelper>([globalWeakRef](const Frame::Ptr &frame) {
                 emitEvent((jobject)globalWeakRef,"onData","(L" MediaFrameSign ";)V",makeJavaFrame(env,frame));
+                return true;
             }));
         }
 

@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -32,9 +32,9 @@ API_EXPORT void API_CALL mk_http_downloader_release(mk_http_downloader ctx) {
 API_EXPORT void API_CALL mk_http_downloader_start(mk_http_downloader ctx, const char *url, const char *file, on_mk_download_complete cb, void *user_data) {
     assert(ctx && url && file);
     HttpDownloader::Ptr *obj = (HttpDownloader::Ptr *) ctx;
-    (*obj)->setOnResult([cb, user_data](ErrCode code, const string &errMsg, const string &filePath) {
+    (*obj)->setOnResult([cb, user_data](const SockException &ex, const string &filePath) {
         if (cb) {
-            cb(user_data, code, errMsg.data(), filePath.data());
+            cb(user_data, ex.getErrCode(), ex.what(), filePath.data());
         }
     });
     (*obj)->startDownload(url, file, false);
@@ -104,7 +104,7 @@ API_EXPORT void API_CALL mk_http_requester_add_header(mk_http_requester ctx,cons
 API_EXPORT const char* API_CALL mk_http_requester_get_response_status(mk_http_requester ctx){
     assert(ctx);
     HttpRequester::Ptr *obj = (HttpRequester::Ptr *)ctx;
-    return (*obj)->responseStatus().c_str();
+    return (*obj)->response().Url().c_str();
 }
 
 API_EXPORT const char* API_CALL mk_http_requester_get_response_header(mk_http_requester ctx,const char *key){
@@ -113,7 +113,7 @@ API_EXPORT const char* API_CALL mk_http_requester_get_response_header(mk_http_re
     return (*obj)->response()[key].c_str();
 }
 
-API_EXPORT const char* API_CALL mk_http_requester_get_response_body(mk_http_requester ctx, int *length){
+API_EXPORT const char* API_CALL mk_http_requester_get_response_body(mk_http_requester ctx, size_t *length){
     assert(ctx);
     HttpRequester::Ptr *obj = (HttpRequester::Ptr *)ctx;
     if(length){
@@ -131,14 +131,15 @@ API_EXPORT mk_parser API_CALL mk_http_requester_get_response(mk_http_requester c
 API_EXPORT void API_CALL mk_http_requester_set_cb(mk_http_requester ctx,on_mk_http_requester_complete cb, void *user_data){
     assert(ctx && cb);
     HttpRequester::Ptr *obj = (HttpRequester::Ptr *)ctx;
-    (*obj)->setOnResult([cb,user_data](const SockException &ex,const string &status,const StrCaseMap &header,const string &strRecvBody){
-        cb(user_data, ex.getErrCode(),ex.what());
+    (*obj)->setOnResult([cb, user_data](const SockException &ex, const Parser &res) {
+        cb(user_data, ex.getErrCode(), ex.what());
     });
 }
 
 API_EXPORT void API_CALL mk_http_requester_start(mk_http_requester ctx,const char *url, float timeout_second){
     assert(ctx && url && url[0] && timeout_second > 0);
     HttpRequester::Ptr *obj = (HttpRequester::Ptr *)ctx;
-    (*obj)->sendRequest(url,timeout_second);
+    (*obj)->setCompleteTimeout(timeout_second * 1000);
+    (*obj)->sendRequest(url);
 }
 

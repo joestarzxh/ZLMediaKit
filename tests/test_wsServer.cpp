@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -14,6 +14,7 @@
 #include "Util/MD5.h"
 #include "Util/logger.h"
 #include "Http/WebSocketSession.h"
+
 using namespace std;
 using namespace toolkit;
 using namespace mediakit;
@@ -30,7 +31,7 @@ public:
         DebugL;
     }
 
-    void attachServer(const TcpServer &server) override{
+    void attachServer(const Server &server) override{
         DebugL << getIdentifier() << " " << TcpSession::getIdentifier();
     }
     void onRecv(const Buffer::Ptr &buffer) override {
@@ -57,7 +58,7 @@ public:
         DebugL;
     }
 
-    void attachServer(const TcpServer &server) override{
+    void attachServer(const Server &server) override{
         DebugL << getIdentifier() << " " << TcpSession::getIdentifier();
     }
     void onRecv(const Buffer::Ptr &buffer) override {

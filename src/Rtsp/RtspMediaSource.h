@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -25,9 +25,9 @@
 #include "Util/ResourcePool.h"
 #include "Util/NoticeCenter.h"
 #include "Thread/ThreadPool.h"
-using namespace std;
-using namespace toolkit;
+
 #define RTP_GOP_SIZE 512
+
 namespace mediakit {
 
 /**
@@ -36,12 +36,12 @@ namespace mediakit {
  * 只要生成了这两要素，那么要实现rtsp推流、rtsp服务器就很简单了
  * rtsp推拉流协议中，先传递sdp，然后再协商传输方式(tcp/udp/组播)，最后一直传递rtp
  */
-class RtspMediaSource : public MediaSource, public RingDelegate<RtpPacket::Ptr>, public PacketCache<RtpPacket> {
+class RtspMediaSource : public MediaSource, public toolkit::RingDelegate<RtpPacket::Ptr>, private PacketCache<RtpPacket> {
 public:
-    typedef ResourcePool<RtpPacket> PoolType;
-    typedef std::shared_ptr<RtspMediaSource> Ptr;
-    typedef std::shared_ptr<List<RtpPacket::Ptr> > RingDataType;
-    typedef RingBuffer<RingDataType> RingType;
+    using PoolType = toolkit::ResourcePool<RtpPacket>;
+    using Ptr = std::shared_ptr<RtspMediaSource>;
+    using RingDataType = std::shared_ptr<toolkit::List<RtpPacket::Ptr> >;
+    using RingType = toolkit::RingBuffer<RingDataType>;
 
     /**
      * 构造函数
@@ -50,9 +50,9 @@ public:
      * @param stream_id 流id
      * @param ring_size 可以设置固定的环形缓冲大小，0则自适应
      */
-    RtspMediaSource(const string &vhost,
-                    const string &app,
-                    const string &stream_id,
+    RtspMediaSource(const std::string &vhost,
+                    const std::string &app,
+                    const std::string &stream_id,
                     int ring_size = RTP_GOP_SIZE) :
             MediaSource(RTSP_SCHEMA, vhost, app, stream_id), _ring_size(ring_size) {}
 
@@ -75,7 +75,7 @@ public:
     /**
      * 获取该源的sdp
      */
-    const string &getSdp() const {
+    const std::string &getSdp() const {
         return _sdp;
     }
 
@@ -84,7 +84,7 @@ public:
      */
     virtual uint32_t getSsrc(TrackType trackType) {
         assert(trackType >= 0 && trackType < TrackMax);
-        auto track = _tracks[trackType];
+        auto &track = _tracks[trackType];
         if (!track) {
             return 0;
         }
@@ -96,7 +96,7 @@ public:
      */
     virtual uint16_t getSeqence(TrackType trackType) {
         assert(trackType >= 0 && trackType < TrackMax);
-        auto track = _tracks[trackType];
+        auto &track = _tracks[trackType];
         if (!track) {
             return 0;
         }
@@ -110,7 +110,7 @@ public:
         assert(trackType >= TrackInvalid && trackType < TrackMax);
         if (trackType != TrackInvalid) {
             //获取某track的时间戳
-            auto track = _tracks[trackType];
+            auto &track = _tracks[trackType];
             if (track) {
                 return track->_time_stamp;
             }
@@ -140,12 +140,12 @@ public:
     /**
      * 设置sdp
      */
-    virtual void setSdp(const string &sdp) {
-        _sdp = sdp;
+    virtual void setSdp(const std::string &sdp) {
         SdpParser sdp_parser(sdp);
         _tracks[TrackVideo] = sdp_parser.getTrack(TrackVideo);
         _tracks[TrackAudio] = sdp_parser.getTrack(TrackAudio);
         _have_video = (bool) _tracks[TrackVideo];
+        _sdp = sdp_parser.toString();
         if (_ring) {
             regist();
         }
@@ -156,16 +156,18 @@ public:
      * @param rtp rtp包
      * @param keyPos 该包是否为关键帧的第一个包
      */
-    void onWrite(const RtpPacket::Ptr &rtp, bool keyPos) override {
+    void onWrite(RtpPacket::Ptr rtp, bool keyPos) override {
+        _speed[rtp->type] += rtp->size();
         assert(rtp->type >= 0 && rtp->type < TrackMax);
-        auto track = _tracks[rtp->type];
+        auto &track = _tracks[rtp->type];
+        auto stamp = rtp->getStampMS();
         if (track) {
-            track->_seq = rtp->sequence;
-            track->_time_stamp = rtp->timeStamp;
-            track->_ssrc = rtp->ssrc;
+            track->_seq = rtp->getSeq();
+            track->_time_stamp = rtp->getStamp() * uint64_t(1000) / rtp->sample_rate;
+            track->_ssrc = rtp->getSSRC();
         }
         if (!_ring) {
-            weak_ptr<RtspMediaSource> weakSelf = dynamic_pointer_cast<RtspMediaSource>(shared_from_this());
+            std::weak_ptr<RtspMediaSource> weakSelf = std::dynamic_pointer_cast<RtspMediaSource>(shared_from_this());
             auto lam = [weakSelf](int size) {
                 auto strongSelf = weakSelf.lock();
                 if (!strongSelf) {
@@ -181,7 +183,8 @@ public:
                 regist();
             }
         }
-        PacketCache<RtpPacket>::inputPacket(rtp->type == TrackVideo, rtp, keyPos);
+        bool is_video = rtp->type == TrackVideo;
+        PacketCache<RtpPacket>::inputPacket(stamp, is_video, std::move(rtp), keyPos);
     }
 
     void clearCache() override{
@@ -195,15 +198,15 @@ private:
      * @param rtp_list rtp包列表
      * @param key_pos 是否包含关键帧
      */
-    void onFlush(std::shared_ptr<List<RtpPacket::Ptr> > &rtp_list, bool key_pos) override {
+    void onFlush(std::shared_ptr<toolkit::List<RtpPacket::Ptr> > rtp_list, bool key_pos) override {
         //如果不存在视频，那么就没有存在GOP缓存的意义，所以is_key一直为true确保一直清空GOP缓存
-        _ring->write(rtp_list, _have_video ? key_pos : true);
+        _ring->write(std::move(rtp_list), _have_video ? key_pos : true);
     }
 
 private:
     bool _have_video = false;
     int _ring_size;
-    string _sdp;
+    std::string _sdp;
     RingType::Ptr _ring;
     SdpTrack::Ptr _tracks[TrackMax];
 };

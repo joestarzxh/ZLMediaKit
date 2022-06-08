@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2020 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -9,10 +9,14 @@
  */
 
 #include <cstdlib>
+#include <cinttypes>
 #include "HlsParser.h"
 #include "Util/util.h"
 #include "Common/Parser.h"
+
+using namespace std;
 using namespace toolkit;
+
 namespace mediakit {
 
 bool HlsParser::parse(const string &http_url, const string &m3u8) {
@@ -90,7 +94,7 @@ bool HlsParser::parse(const string &http_url, const string &m3u8) {
         }
 
         if (line.find("#EXT-X-MEDIA-SEQUENCE:") == 0) {
-            sscanf(line.data(), "#EXT-X-MEDIA-SEQUENCE:%lld", &_sequence);
+            sscanf(line.data(), "#EXT-X-MEDIA-SEQUENCE:%" PRId64, &_sequence);
             continue;
         }
 
@@ -128,12 +132,16 @@ int HlsParser::getTargetDur() const {
     return _target_dur;
 }
 
-int HlsParser::getSequence() const {
+int64_t HlsParser::getSequence() const {
     return _sequence;
 }
 
 bool HlsParser::isM3u8Inner() const {
     return _is_m3u8_inner;
+}
+
+float HlsParser::getTotalDuration() const {
+    return _total_dur;
 }
 
 }//namespace mediakit

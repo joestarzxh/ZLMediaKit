@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -148,10 +148,22 @@ typedef struct {
      * @param is_player 客户端是否为播放器
      */
     void (API_CALL *on_mk_flow_report)(const mk_media_info url_info,
-                                       uint64_t total_bytes,
-                                       uint64_t total_seconds,
+                                       size_t total_bytes,
+                                       size_t total_seconds,
                                        int is_player,
                                        const mk_sock_info sender);
+                                       
+
+    /**
+     * 日志输出广播
+     * @param level 日志级别
+     * @param file 源文件名
+     * @param line 源文件行
+     * @param function 源文件函数名
+     * @param message 日志内容
+     */
+    void (API_CALL *on_mk_log)(int level, const char *file, int line, const char *function, const char *message);
+
 } mk_events;
 
 

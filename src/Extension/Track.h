@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -16,7 +16,6 @@
 #include "Frame.h"
 #include "Util/RingBuffer.h"
 #include "Rtsp/Rtsp.h"
-using namespace toolkit;
 
 namespace mediakit{
 
@@ -32,7 +31,6 @@ public:
 
     /**
      * 是否准备好，准备好才能获取譬如sps pps等信息
-     * @return
      */
     virtual bool ready() = 0;
 
@@ -40,7 +38,6 @@ public:
      * 克隆接口，用于复制本对象用
      * 在调用该接口时只会复制派生类的信息
      * 环形缓存和代理关系不能拷贝，否则会关系紊乱
-     * @return
      */
     virtual Track::Ptr clone() = 0;
 
@@ -51,11 +48,27 @@ public:
     virtual Sdp::Ptr getSdp() = 0;
 
     /**
+     * 返回比特率
+     * @return 比特率
+     */
+    virtual int getBitRate() const { return _bit_rate; }
+
+    /**
+     * 设置比特率
+     * @param bit_rate 比特率
+     */
+    virtual void setBitRate(int bit_rate) { _bit_rate = bit_rate; }
+
+    /**
      * 复制拷贝，只能拷贝派生类的信息，
      * 环形缓存和代理关系不能拷贝，否则会关系紊乱
-     * @param that
      */
-    Track(const Track &that){}
+    Track(const Track &that){
+        _bit_rate = that._bit_rate;
+    }
+
+private:
+    int _bit_rate = 0;
 };
 
 /**
@@ -67,19 +80,16 @@ public:
 
     /**
      * 返回视频高度
-     * @return
      */
     virtual int getVideoHeight() const {return 0;};
 
     /**
      * 返回视频宽度
-     * @return
      */
     virtual int getVideoWidth() const {return 0;};
 
     /**
      * 返回视频fps
-     * @return
      */
     virtual float getVideoFps() const {return 0;};
 };
@@ -93,19 +103,16 @@ public:
 
     /**
      * 返回音频采样率
-     * @return
      */
     virtual int getAudioSampleRate() const  {return 0;};
 
     /**
      * 返回音频采样位数，一般为16或8
-     * @return
      */
     virtual int getAudioSampleBit() const {return 0;};
 
     /**
      * 返回音频通道数
-     * @return
      */
     virtual int getAudioChannel() const {return 0;};
 };
@@ -178,7 +185,7 @@ public:
      * 获取全部的Track
      * @param trackReady 是否获取全部已经准备好的Track
      */
-    virtual vector<Track::Ptr> getTracks(bool trackReady = true) const = 0;
+    virtual std::vector<Track::Ptr> getTracks(bool trackReady = true) const = 0;
 
     /**
      * 获取特定Track

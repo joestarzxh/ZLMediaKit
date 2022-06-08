@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -21,9 +21,9 @@ class RtmpMediaSourceMuxer : public RtmpMuxer, public MediaSourceEventIntercepto
 public:
     typedef std::shared_ptr<RtmpMediaSourceMuxer> Ptr;
 
-    RtmpMediaSourceMuxer(const string &vhost,
-                         const string &strApp,
-                         const string &strId,
+    RtmpMediaSourceMuxer(const std::string &vhost,
+                         const std::string &strApp,
+                         const std::string &strId,
                          const TitleMeta::Ptr &title = nullptr) : RtmpMuxer(title){
         _media_src = std::make_shared<RtmpMediaSource>(vhost, strApp, strId);
         getRtmpRing()->setDelegate(_media_src);
@@ -32,7 +32,7 @@ public:
     ~RtmpMediaSourceMuxer() override{}
 
     void setListener(const std::weak_ptr<MediaSourceEvent> &listener){
-        _listener = listener;
+        setDelegate(listener);
         _media_src->setListener(shared_from_this());
     }
 
@@ -50,26 +50,30 @@ public:
     }
 
     void onReaderChanged(MediaSource &sender, int size) override {
-        _enabled = size;
-        if (!size) {
+        GET_CONFIG(bool, rtmp_demand, General::kRtmpDemand);
+        _enabled = rtmp_demand ? size : true;
+        if (!size && rtmp_demand) {
             _clear_cache = true;
         }
         MediaSourceEventInterceptor::onReaderChanged(sender, size);
     }
 
-    void inputFrame(const Frame::Ptr &frame) override {
-        if (_clear_cache) {
+    bool inputFrame(const Frame::Ptr &frame) override {
+        GET_CONFIG(bool, rtmp_demand, General::kRtmpDemand);
+        if (_clear_cache && rtmp_demand) {
             _clear_cache = false;
             _media_src->clearCache();
         }
-        if (_enabled) {
-            RtmpMuxer::inputFrame(frame);
+        if (_enabled || !rtmp_demand) {
+            return RtmpMuxer::inputFrame(frame);
         }
+        return false;
     }
 
     bool isEnabled() {
+        GET_CONFIG(bool, rtmp_demand, General::kRtmpDemand);
         //缓存尚未清空时，还允许触发inputFrame函数，以便及时清空缓存
-        return _clear_cache ? true : _enabled;
+        return rtmp_demand ? (_clear_cache ? true : _enabled) : true;
     }
 
 private:

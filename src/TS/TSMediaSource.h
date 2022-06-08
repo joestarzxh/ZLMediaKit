@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -12,46 +12,34 @@
 #define ZLMEDIAKIT_TSMEDIASOURCE_H
 
 #include "Common/MediaSource.h"
-using namespace toolkit;
+
 #define TS_GOP_SIZE 512
 
 namespace mediakit {
 
 //TS直播数据包
-class TSPacket : public BufferRaw{
+class TSPacket : public toolkit::BufferOffset<toolkit::Buffer::Ptr>{
 public:
     using Ptr = std::shared_ptr<TSPacket>;
 
     template<typename ...ARGS>
-    TSPacket(ARGS && ...args) : BufferRaw(std::forward<ARGS>(args)...) {};
+    TSPacket(ARGS && ...args) : BufferOffset<Buffer::Ptr>(std::forward<ARGS>(args)...) {};
     ~TSPacket() override = default;
 
 public:
     uint32_t time_stamp = 0;
 };
 
-//TS直播合并写策略类
-class TSFlushPolicy : public FlushPolicy{
-public:
-    TSFlushPolicy() = default;
-    ~TSFlushPolicy() = default;
-
-    uint32_t getStamp(const TSPacket::Ptr &packet) {
-        return packet->time_stamp;
-    }
-};
-
 //TS直播源
-class TSMediaSource : public MediaSource, public RingDelegate<TSPacket::Ptr>, public PacketCache<TSPacket, TSFlushPolicy>{
+class TSMediaSource : public MediaSource, public toolkit::RingDelegate<TSPacket::Ptr>, private PacketCache<TSPacket>{
 public:
-    using PoolType = ResourcePool<TSPacket>;
     using Ptr = std::shared_ptr<TSMediaSource>;
-    using RingDataType = std::shared_ptr<List<TSPacket::Ptr> >;
-    using RingType = RingBuffer<RingDataType>;
+    using RingDataType = std::shared_ptr<toolkit::List<TSPacket::Ptr> >;
+    using RingType = toolkit::RingBuffer<RingDataType>;
 
-    TSMediaSource(const string &vhost,
-                  const string &app,
-                  const string &stream_id,
+    TSMediaSource(const std::string &vhost,
+                  const std::string &app,
+                  const std::string &stream_id,
                   int ring_size = TS_GOP_SIZE) : MediaSource(TS_SCHEMA, vhost, app, stream_id), _ring_size(ring_size) {}
 
     ~TSMediaSource() override = default;
@@ -75,27 +63,29 @@ public:
      * @param packet TS包
      * @param key 是否为关键帧第一个包
      */
-    void onWrite(const TSPacket::Ptr &packet, bool key) override {
+    void onWrite(TSPacket::Ptr packet, bool key) override {
+        _speed[TrackVideo] += packet->size();
         if (!_ring) {
             createRing();
         }
         if (key) {
             _have_video = true;
         }
-        PacketCache<TSPacket, TSFlushPolicy>::inputPacket(true, packet, key);
+        auto stamp = packet->time_stamp;
+        PacketCache<TSPacket>::inputPacket(stamp, true, std::move(packet), key);
     }
 
     /**
      * 情况GOP缓存
      */
     void clearCache() override {
-        PacketCache<TSPacket, TSFlushPolicy>::clearCache();
+        PacketCache<TSPacket>::clearCache();
         _ring->clearCache();
     }
 
 private:
     void createRing(){
-        weak_ptr<TSMediaSource> weak_self = dynamic_pointer_cast<TSMediaSource>(shared_from_this());
+        std::weak_ptr<TSMediaSource> weak_self = std::dynamic_pointer_cast<TSMediaSource>(shared_from_this());
         _ring = std::make_shared<RingType>(_ring_size, [weak_self](int size) {
             auto strong_self = weak_self.lock();
             if (!strong_self) {
@@ -113,9 +103,9 @@ private:
      * @param packet_list 合并写缓存列队
      * @param key_pos 是否包含关键帧
      */
-    void onFlush(std::shared_ptr<List<TSPacket::Ptr> > &packet_list, bool key_pos) override {
+    void onFlush(std::shared_ptr<toolkit::List<TSPacket::Ptr> > packet_list, bool key_pos) override {
         //如果不存在视频，那么就没有存在GOP缓存的意义，所以确保一直清空GOP缓存
-        _ring->write(packet_list, _have_video ? key_pos : true);
+        _ring->write(std::move(packet_list), _have_video ? key_pos : true);
     }
 
 private:

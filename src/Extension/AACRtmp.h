@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -19,7 +19,7 @@ namespace mediakit{
 /**
  * aac Rtmp转adts类
  */
-class AACRtmpDecoder : public RtmpCodec , public ResourcePoolHelper<FrameImp> {
+class AACRtmpDecoder : public RtmpCodec{
 public:
     typedef std::shared_ptr<AACRtmpDecoder> Ptr;
 
@@ -37,17 +37,17 @@ public:
     }
 
 private:
-    void onGetAAC(const char *data, int len, uint32_t stamp);
+    void onGetAAC(const char *data, size_t len, uint32_t stamp);
 
 private:
-    string _aac_cfg;
+    std::string _aac_cfg;
 };
 
 
 /**
  * aac adts转Rtmp类
  */
-class AACRtmpEncoder : public AACRtmpDecoder ,  public ResourcePoolHelper<RtmpPacket> {
+class AACRtmpEncoder : public AACRtmpDecoder{
 public:
     typedef std::shared_ptr<AACRtmpEncoder> Ptr;
 
@@ -64,7 +64,7 @@ public:
      * 输入aac 数据，可以不带adts头
      * @param frame aac数据
      */
-    void inputFrame(const Frame::Ptr &frame) override;
+    bool inputFrame(const Frame::Ptr &frame) override;
 
     /**
      * 生成config包
@@ -77,7 +77,7 @@ private:
 private:
     uint8_t _audio_flv_flags;
     AACTrack::Ptr _track;
-    string _aac_cfg;
+    std::string _aac_cfg;
 };
 
 }//namespace mediakit

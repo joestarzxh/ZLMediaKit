@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -24,44 +24,43 @@ AACRtpEncoder::AACRtpEncoder(uint32_t ui32Ssrc,
                 ui8Interleaved){
 }
 
-void AACRtpEncoder::inputFrame(const Frame::Ptr &frame) {
-    GET_CONFIG(uint32_t, cycleMS, Rtp::kCycleMS);
-    auto uiStamp = frame->dts();
-    auto pcData = frame->data() + frame->prefixSize();
-    auto iLen = frame->size() - frame->prefixSize();
-
-    uiStamp %= cycleMS;
-    char *ptr = (char *) pcData;
-    int iSize = iLen;
-    while (iSize > 0) {
-        if (iSize <= _ui32MtuSize - 20) {
-            _aucSectionBuf[0] = 0;
-            _aucSectionBuf[1] = 16;
-            _aucSectionBuf[2] = iLen >> 5;
-            _aucSectionBuf[3] = (iLen & 0x1F) << 3;
-            memcpy(_aucSectionBuf + 4, ptr, iSize);
-            makeAACRtp(_aucSectionBuf, iSize + 4, true, uiStamp);
+bool AACRtpEncoder::inputFrame(const Frame::Ptr &frame) {
+    auto stamp = frame->dts();
+    auto data = frame->data() + frame->prefixSize();
+    auto len = frame->size() - frame->prefixSize();
+    auto ptr = (char *) data;
+    auto remain_size = len;
+    auto max_size = getMaxSize() - 4;
+    while (remain_size > 0) {
+        if (remain_size <= max_size) {
+            _section_buf[0] = 0;
+            _section_buf[1] = 16;
+            _section_buf[2] = (len >> 5) & 0xFF;
+            _section_buf[3] = ((len & 0x1F) << 3) & 0xFF;
+            memcpy(_section_buf + 4, ptr, remain_size);
+            makeAACRtp(_section_buf, remain_size + 4, true, stamp);
             break;
         }
-        _aucSectionBuf[0] = 0;
-        _aucSectionBuf[1] = 16;
-        _aucSectionBuf[2] = (iLen) >> 5;
-        _aucSectionBuf[3] = (iLen & 0x1F) << 3;
-        memcpy(_aucSectionBuf + 4, ptr, _ui32MtuSize - 20);
-        makeAACRtp(_aucSectionBuf, _ui32MtuSize - 16, false, uiStamp);
-        ptr += (_ui32MtuSize - 20);
-        iSize -= (_ui32MtuSize - 20);
+        _section_buf[0] = 0;
+        _section_buf[1] = 16;
+        _section_buf[2] = ((len) >> 5) & 0xFF;
+        _section_buf[3] = ((len & 0x1F) << 3) & 0xFF;
+        memcpy(_section_buf + 4, ptr, max_size);
+        makeAACRtp(_section_buf, max_size + 4, false, stamp);
+        ptr += max_size;
+        remain_size -= max_size;
     }
+    return len > 0;
 }
 
-void AACRtpEncoder::makeAACRtp(const void *data, unsigned int len, bool mark, uint32_t uiStamp) {
+void AACRtpEncoder::makeAACRtp(const void *data, size_t len, bool mark, uint32_t uiStamp) {
     RtpCodec::inputRtp(makeRtp(getTrackType(), data, len, mark, uiStamp), false);
 }
 
 /////////////////////////////////////////////////////////////////////////////////////
 
 AACRtpDecoder::AACRtpDecoder(const Track::Ptr &track) {
-    auto aacTrack = dynamic_pointer_cast<AACTrack>(track);
+    auto aacTrack = std::dynamic_pointer_cast<AACTrack>(track);
     if (!aacTrack || !aacTrack->ready()) {
         WarnL << "该aac track无效!";
     } else {
@@ -76,21 +75,26 @@ AACRtpDecoder::AACRtpDecoder() {
 
 void AACRtpDecoder::obtainFrame() {
     //从缓存池重新申请对象，防止覆盖已经写入环形缓存的对象
-    _frame = ResourcePoolHelper<FrameImp>::obtainObj();
-    _frame->_prefix_size = 0;
-    _frame->_buffer.clear();
+    _frame = FrameImp::create();
     _frame->_codec_id = CodecAAC;
 }
 
-bool AACRtpDecoder::inputRtp(const RtpPacket::Ptr &rtppack, bool key_pos) {
+bool AACRtpDecoder::inputRtp(const RtpPacket::Ptr &rtp, bool key_pos) {
+    auto payload_size = rtp->getPayloadSize();
+    if (payload_size <= 0) {
+        //无实际负载
+        return false;
+    }
+
+    auto stamp = rtp->getStampMS();
     //rtp数据开始部分
-    uint8_t *ptr = (uint8_t *) rtppack->data() + rtppack->offset;
+    auto ptr = rtp->getPayload();
     //rtp数据末尾
-    uint8_t *end = (uint8_t *) rtppack->data() + rtppack->size();
+    auto end = ptr + payload_size;
     //首2字节表示Au-Header的个数，单位bit，所以除以16得到Au-Header个数
-    uint16_t au_header_count = ((ptr[0] << 8) | ptr[1]) >> 4;
+    auto au_header_count = ((ptr[0] << 8) | ptr[1]) >> 4;
     //记录au_header起始指针
-    uint8_t *au_header_ptr = ptr + 2;
+    auto au_header_ptr = ptr + 2;
     ptr = au_header_ptr +  au_header_count * 2;
 
     if (end < ptr) {
@@ -100,11 +104,11 @@ bool AACRtpDecoder::inputRtp(const RtpPacket::Ptr &rtppack, bool key_pos) {
 
     if (!_last_dts) {
         //记录第一个时间戳
-        _last_dts = rtppack->timeStamp;
+        _last_dts = stamp;
     }
 
     //每个audio unit时间戳增量
-    auto dts_inc = (rtppack->timeStamp - _last_dts) / au_header_count;
+    auto dts_inc = (stamp - _last_dts) / au_header_count;
     if (dts_inc < 0 && dts_inc > 100) {
         //时间戳增量异常，忽略
         dts_inc = 0;
@@ -129,18 +133,24 @@ bool AACRtpDecoder::inputRtp(const RtpPacket::Ptr &rtppack, bool key_pos) {
         }
     }
     //记录上次时间戳
-    _last_dts = rtppack->timeStamp;
+    _last_dts = stamp;
     return false;
 }
 
 void AACRtpDecoder::flushData() {
-    //插入adts头
-    char adts_header[32] = {0};
-    auto size = dumpAacConfig(_aac_cfg, _frame->_buffer.size(), (uint8_t *) adts_header, sizeof(adts_header));
-    if (size > 0) {
-        //插入adts头
-        _frame->_buffer.insert(0, adts_header, size);
-        _frame->_prefix_size = size;
+    auto ptr = reinterpret_cast<const uint8_t *>(_frame->data());
+    if ((ptr[0] == 0xFF && (ptr[1] & 0xF0) == 0xF0) && _frame->size() > ADTS_HEADER_LEN) {
+        //adts头打入了rtp包，不符合规范，兼容EasyPusher的bug
+        _frame->_prefix_size = ADTS_HEADER_LEN;
+    } else {
+        //没有adts头则插入adts头
+        char adts_header[128] = {0};
+        auto size = dumpAacConfig(_aac_cfg, _frame->_buffer.size(), (uint8_t *) adts_header, sizeof(adts_header));
+        if (size > 0) {
+            //插入adts头
+            _frame->_buffer.insert(0, adts_header, size);
+            _frame->_prefix_size = size;
+        }
     }
     RtpCodec::inputFrame(_frame);
     obtainFrame();

@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -18,7 +18,7 @@
 #include <map>
 #include <stdexcept>
 #include <functional>
-using namespace std;
+#include "Network/Buffer.h"
 
 enum AMFType {
     AMF_NUMBER,
@@ -37,8 +37,9 @@ class AMFValue;
 class AMFValue {
 public:
     friend class AMFEncoder;
-    typedef std::map<std::string, AMFValue> mapType;
-    typedef std::vector<AMFValue> arrayType;
+
+    using mapType = std::map<std::string, AMFValue>;
+    using arrayType = std::vector<AMFValue>;
 
     ~AMFValue();
     AMFValue(AMFType type = AMF_NULL);
@@ -56,17 +57,19 @@ public:
     double as_number() const;
     int as_integer() const;
     bool as_boolean() const;
-    string to_string() const;
+    std::string to_string() const;
     const AMFValue &operator[](const char *str) const;
-    void object_for_each(const function<void(const string &key, const AMFValue &val)> &fun) const ;
+    void object_for_each(const std::function<void(const std::string &key, const AMFValue &val)> &fun) const ;
     operator bool() const;
     void set(const std::string &s, const AMFValue &val);
     void add(const AMFValue &val);
+
 private:
     const mapType &getMap() const;
     const arrayType &getArr() const;
     void destroy();
     void init();
+
 private:
     AMFType _type;
     union {
@@ -81,9 +84,10 @@ private:
 
 class AMFDecoder {
 public:
-    AMFDecoder(const std::string &buf, size_t pos, int version = 0);
+    AMFDecoder(const toolkit::BufferLikeString &buf, size_t pos, int version = 0);
     template<typename TP>
     TP load();
+
 private:
     std::string load_key();
     AMFValue load_object();
@@ -91,8 +95,9 @@ private:
     AMFValue load_arr();
     uint8_t front();
     uint8_t pop_front();
+
 private:
-    const std::string &buf;
+    const toolkit::BufferLikeString &buf;
     size_t pos;
     int version;
 };
@@ -108,9 +113,11 @@ public:
     AMFEncoder & operator <<(const AMFValue &value);
     const std::string& data() const ;
     void clear() ;
+
 private:
     void write_key(const std::string &s);
     AMFEncoder &write_undefined();
+
 private:
     std::string buf;
 };

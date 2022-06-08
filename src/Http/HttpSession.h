@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -22,12 +22,9 @@
 #include "TS/TSMediaSource.h"
 #include "FMP4/FMP4MediaSource.h"
 
-using namespace std;
-using namespace toolkit;
-
 namespace mediakit {
 
-class HttpSession: public TcpSession,
+class HttpSession: public toolkit::TcpSession,
                    public FlvMuxer,
                    public HttpRequestSplitter,
                    public WebSocketSplitter {
@@ -40,25 +37,25 @@ public:
      * @param accessPath 运行或禁止访问的根目录
      * @param cookieLifeSecond 鉴权cookie有效期
      **/
-    typedef std::function<void(const string &errMsg,const string &accessPath, int cookieLifeSecond)> HttpAccessPathInvoker;
+    typedef std::function<void(const std::string &errMsg,const std::string &accessPath, int cookieLifeSecond)> HttpAccessPathInvoker;
 
-    HttpSession(const Socket::Ptr &pSock);
+    HttpSession(const toolkit::Socket::Ptr &pSock);
     ~HttpSession() override;
 
-    void onRecv(const Buffer::Ptr &) override;
-    void onError(const SockException &err) override;
+    void onRecv(const toolkit::Buffer::Ptr &) override;
+    void onError(const toolkit::SockException &err) override;
     void onManager() override;
-    static string urlDecode(const string &str);
+    static std::string urlDecode(const std::string &str);
 
 protected:
     //FlvMuxer override
-    void onWrite(const Buffer::Ptr &data, bool flush) override ;
+    void onWrite(const toolkit::Buffer::Ptr &data, bool flush) override ;
     void onDetach() override;
     std::shared_ptr<FlvMuxer> getSharedPtr() override;
 
     //HttpRequestSplitter override
-    int64_t onRecvHeader(const char *data,uint64_t len) override;
-    void onRecvContent(const char *data,uint64_t len) override;
+    ssize_t onRecvHeader(const char *data,size_t len) override;
+    void onRecvContent(const char *data,size_t len) override;
 
     /**
      * 重载之用于处理不定长度的content
@@ -71,10 +68,10 @@ protected:
      */
     virtual void onRecvUnlimitedContent(const Parser &header,
                                         const char *data,
-                                        uint64_t len,
-                                        uint64_t totalSize,
-                                        uint64_t recvedSize){
-        shutdown(SockException(Err_shutdown,"http post content is too huge,default closed"));
+                                        size_t len,
+                                        size_t totalSize,
+                                        size_t recvedSize){
+        shutdown(toolkit::SockException(toolkit::Err_shutdown,"http post content is too huge,default closed"));
     }
 
     /**
@@ -92,7 +89,7 @@ protected:
      * 发送数据进行websocket协议打包后回调
      * @param buffer websocket协议数据
      */
-    void onWebSocketEncodeData(const Buffer::Ptr &buffer) override;
+    void onWebSocketEncodeData(toolkit::Buffer::Ptr buffer) override;
 
     /**
      * 接收到完整的一个webSocket数据包后回调
@@ -101,22 +98,23 @@ protected:
     void onWebSocketDecodeComplete(const WebSocketHeader &header_in) override;
 
 private:
-    void Handle_Req_GET(int64_t &content_len);
-    void Handle_Req_GET_l(int64_t &content_len, bool sendBody);
-    void Handle_Req_POST(int64_t &content_len);
-    void Handle_Req_HEAD(int64_t &content_len);
+    void Handle_Req_GET(ssize_t &content_len);
+    void Handle_Req_GET_l(ssize_t &content_len, bool sendBody);
+    void Handle_Req_POST(ssize_t &content_len);
+    void Handle_Req_HEAD(ssize_t &content_len);
+    void Handle_Req_OPTIONS(ssize_t &content_len);
 
-    bool checkLiveStream(const string &schema, const string  &url_suffix, const function<void(const MediaSource::Ptr &src)> &cb);
+    bool checkLiveStream(const std::string &schema, const std::string  &url_suffix, const std::function<void(const MediaSource::Ptr &src)> &cb);
 
-    bool checkLiveStreamFlv(const function<void()> &cb = nullptr);
-    bool checkLiveStreamTS(const function<void()> &cb = nullptr);
-    bool checkLiveStreamFMP4(const function<void()> &fmp4_list = nullptr);
+    bool checkLiveStreamFlv(const std::function<void()> &cb = nullptr);
+    bool checkLiveStreamTS(const std::function<void()> &cb = nullptr);
+    bool checkLiveStreamFMP4(const std::function<void()> &fmp4_list = nullptr);
 
     bool checkWebSocket();
     bool emitHttpEvent(bool doInvoke);
     void urlDecode(Parser &parser);
     void sendNotFound(bool bClose);
-    void sendResponse(const char *pcStatus, bool bClose, const char *pcContentType = nullptr,
+    void sendResponse(int code, bool bClose, const char *pcContentType = nullptr,
                       const HttpSession::KeyValue &header = HttpSession::KeyValue(),
                       const HttpBody::Ptr &body = nullptr, bool no_content_length = false);
 
@@ -128,18 +126,17 @@ private:
     bool _live_over_websocket = false;
     //消耗的总流量
     uint64_t _total_bytes_usage = 0;
-    string _origin;
+    std::string _origin;
     Parser _parser;
-    Ticker _ticker;
+    toolkit::Ticker _ticker;
     MediaInfo _mediaInfo;
     TSMediaSource::RingType::RingReader::Ptr _ts_reader;
     FMP4MediaSource::RingType::RingReader::Ptr _fmp4_reader;
     //处理content数据的callback
-    function<bool (const char *data,uint64_t len) > _contentCallBack;
+    std::function<bool (const char *data,size_t len) > _contentCallBack;
 };
 
-
-typedef TcpSessionWithSSL<HttpSession> HttpsSession;
+using HttpsSession = toolkit::TcpSessionWithSSL<HttpSession>;
 
 } /* namespace mediakit */
 

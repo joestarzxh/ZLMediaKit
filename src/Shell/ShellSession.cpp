@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -14,6 +14,8 @@
 #include "Util/NoticeCenter.h"
 #include "Common/config.h"
 #include "ShellCMD.h"
+
+using namespace std;
 using namespace toolkit;
 
 namespace mediakit {
@@ -79,7 +81,7 @@ inline bool ShellSession::onCommandLine(const string& line) {
         std::shared_ptr<stringstream> ss(new stringstream);
         CMDRegister::Instance()(line,ss);
         SockSender::send(ss->str());
-    }catch(ExitException &ex){
+    }catch(ExitException &){
         return false;
     }catch(std::exception &ex){
         SockSender::send(ex.what());
@@ -91,7 +93,7 @@ inline bool ShellSession::onCommandLine(const string& line) {
 
 inline void ShellSession::pleaseInputUser() {
     SockSender::send("\033[0m");
-    SockSender::send(StrPrinter << SERVER_NAME << " login: " << endl);
+    SockSender::send(StrPrinter << kServerName << " login: " << endl);
     _loginInterceptor = [this](const string &user_name) {
         _strUserName=user_name;
         pleaseInputPasswd();
@@ -108,14 +110,14 @@ inline void ShellSession::pleaseInputPasswd() {
                                  << "\033[0mAuth failed("
                                  << errMessage
                                  << "), please try again.\r\n"
-                                 << _strUserName << "@" << SERVER_NAME
+                                 << _strUserName << "@" << kServerName
                                  << "'s password: \033[8m"
                                  << endl);
                 return;
             }
             SockSender::send("\033[0m");
             SockSender::send("-----------------------------------------\r\n");
-            SockSender::send(StrPrinter<<"欢迎来到"<<SERVER_NAME<<", 你可输入\"help\"查看帮助.\r\n"<<endl);
+            SockSender::send(StrPrinter<<"欢迎来到"<<kServerName<<", 你可输入\"help\"查看帮助.\r\n"<<endl);
             SockSender::send("-----------------------------------------\r\n");
             printShellPrefix();
             _loginInterceptor=nullptr;
@@ -146,7 +148,7 @@ inline void ShellSession::pleaseInputPasswd() {
 }
 
 inline void ShellSession::printShellPrefix() {
-    SockSender::send(StrPrinter << _strUserName << "@" << SERVER_NAME << "# " << endl);
+    SockSender::send(StrPrinter << _strUserName << "@" << kServerName << "# " << endl);
 }
 
 }/* namespace mediakit */

@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -19,8 +19,6 @@
 #include "RtspMediaSource.h"
 #include "Util/mini.h"
 #include "Network/Socket.h"
-using namespace std;
-using namespace toolkit;
 
 namespace mediakit{
 
@@ -29,7 +27,7 @@ public:
     ~MultiCastAddressMaker() {}
     static MultiCastAddressMaker& Instance();
     static bool isMultiCastAddress(uint32_t addr);
-    static string toString(uint32_t addr);
+    static std::string toString(uint32_t addr);
 
     std::shared_ptr<uint32_t> obtain(uint32_t max_try = 10);
 
@@ -39,30 +37,30 @@ private:
 
 private:
     uint32_t _addr = 0;
-    recursive_mutex _mtx;
-    unordered_set<uint32_t> _used_addr;
+    std::recursive_mutex _mtx;
+    std::unordered_set<uint32_t> _used_addr;
 };
 
 class RtpMultiCaster {
 public:
     typedef std::shared_ptr<RtpMultiCaster> Ptr;
-    typedef function<void()> onDetach;
+    typedef std::function<void()> onDetach;
     ~RtpMultiCaster();
 
-    static Ptr get(SocketHelper &helper, const string &local_ip, const string &vhost, const string &app, const string &stream);
+    static Ptr get(toolkit::SocketHelper &helper, const std::string &local_ip, const std::string &vhost, const std::string &app, const std::string &stream);
     void setDetachCB(void *listener,const onDetach &cb);
 
-    string getMultiCasterIP();
+    std::string getMultiCasterIP();
     uint16_t getMultiCasterPort(TrackType trackType);
 
 private:
-    RtpMultiCaster(SocketHelper &helper, const string &local_ip, const string &vhost, const string &app, const string &stream);
+    RtpMultiCaster(toolkit::SocketHelper &helper, const std::string &local_ip, const std::string &vhost, const std::string &app, const std::string &stream);
 
 private:
-    recursive_mutex _mtx;
-    Socket::Ptr _udp_sock[2];
+    std::recursive_mutex _mtx;
+    toolkit::Socket::Ptr _udp_sock[2];
     std::shared_ptr<uint32_t> _multicast_ip;
-    unordered_map<void * , onDetach > _detach_map;
+    std::unordered_map<void * , onDetach > _detach_map;
     RtspMediaSource::RingType::RingReader::Ptr _rtp_reader;
 };
 

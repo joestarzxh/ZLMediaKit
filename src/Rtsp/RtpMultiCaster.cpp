@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -45,10 +45,12 @@ static uint32_t addressToInt(const string &ip){
 
 std::shared_ptr<uint32_t> MultiCastAddressMaker::obtain(uint32_t max_try) {
     lock_guard<recursive_mutex> lck(_mtx);
-    GET_CONFIG(string, addrMinStr, MultiCast::kAddrMin);
-    GET_CONFIG(string, addrMaxStr, MultiCast::kAddrMax);
-    uint32_t addrMin = addressToInt(addrMinStr);
-    uint32_t addrMax = addressToInt(addrMaxStr);
+    GET_CONFIG_FUNC(uint32_t, addrMin, MultiCast::kAddrMin, [](const string &str) {
+        return addressToInt(str);
+    });
+    GET_CONFIG_FUNC(uint32_t, addrMax, MultiCast::kAddrMax, [](const string &str) {
+        return addressToInt(str);
+    });
 
     if (_addr > addrMax || _addr == 0) {
         _addr = addrMin;
@@ -127,13 +129,14 @@ RtpMultiCaster::RtpMultiCaster(SocketHelper &helper, const string &local_ip, con
         //组播目标地址
         peer.sin_addr.s_addr = htonl(*_multicast_ip);
         bzero(&(peer.sin_zero), sizeof peer.sin_zero);
-        _udp_sock[i]->setSendPeerAddr((struct sockaddr *) &peer);
+        _udp_sock[i]->bindPeerAddr((struct sockaddr *) &peer);
     }
 
+    src->pause(false);
     _rtp_reader = src->getRing()->attach(helper.getPoller());
     _rtp_reader->setReadCB([this](const RtspMediaSource::RingDataType &pkt) {
-        int i = 0;
-        int size = pkt->size();
+        size_t i = 0;
+        auto size = pkt->size();
         pkt->for_each([&](const RtpPacket::Ptr &rtp) {
             auto &sock = _udp_sock[rtp->type];
             sock->send(std::make_shared<BufferRtp>(rtp, 4), nullptr, 0, ++i == size);

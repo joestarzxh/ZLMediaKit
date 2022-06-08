@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -12,6 +12,7 @@
 #define MK_PUSHER_H
 
 #include "mk_common.h"
+#include "mk_events_objects.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,7 +30,7 @@ typedef void(API_CALL *on_mk_push_event)(void *user_data,int err_code,const char
 
 /**
  * 绑定的MediaSource对象并创建rtmp[s]/rtsp[s]推流器
- * MediaSource通过mk_media_create或mk_proxy_player_create生成
+ * MediaSource通过mk_media_create或mk_proxy_player_create或推流生成
  * 该MediaSource对象必须已注册
  *
  * @param schema 绑定的MediaSource对象所属协议，支持rtsp/rtmp
@@ -41,6 +42,16 @@ typedef void(API_CALL *on_mk_push_event)(void *user_data,int err_code,const char
 API_EXPORT mk_pusher API_CALL mk_pusher_create(const char *schema,const char *vhost,const char *app, const char *stream);
 
 /**
+ * 绑定的MediaSource对象并创建rtmp[s]/rtsp[s]推流器
+ * MediaSource通过mk_media_create或mk_proxy_player_create或推流生成
+ * 该MediaSource对象必须已注册
+ *
+ * @param src MediaSource对象
+ * @return 对象指针
+ */
+API_EXPORT mk_pusher API_CALL mk_pusher_create_src(mk_media_source src);
+
+/**
  * 释放推流器
  * @param ctx 推流器指针
  */
@@ -49,7 +60,7 @@ API_EXPORT void API_CALL mk_pusher_release(mk_pusher ctx);
 /**
  * 设置推流器配置选项
  * @param ctx 推流器指针
- * @param key 配置项键,支持 net_adapter/rtp_type/rtsp_user/rtsp_pwd/protocol_timeout_ms/media_timeout_ms/beat_interval_ms/max_analysis_ms
+ * @param key 配置项键,支持 net_adapter/rtp_type/rtsp_user/rtsp_pwd/protocol_timeout_ms/media_timeout_ms/beat_interval_ms
  * @param val 配置项值,如果是整形，需要转换成统一转换成string
  */
 API_EXPORT void API_CALL mk_pusher_set_option(mk_pusher ctx, const char *key, const char *val);

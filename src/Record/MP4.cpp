@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -13,98 +13,11 @@
 #include "Util/File.h"
 #include "Util/logger.h"
 #include "Common/config.h"
-#include "fmp4-writer.h"
 
 using namespace toolkit;
+using namespace std;
+
 namespace mediakit {
-
-/////////////////////////////////////////////////mp4_writer_t/////////////////////////////////////////////////
-
-struct mp4_writer_t {
-    int is_fmp4;
-    union {
-        fmp4_writer_t *fmp4;
-        mov_writer_t *mov;
-    } u;
-};
-
-mp4_writer_t* mp4_writer_create(int is_fmp4, const struct mov_buffer_t *buffer, void* param, int flags){
-    mp4_writer_t *mp4 = (mp4_writer_t *) malloc(sizeof(mp4_writer_t));
-    mp4->is_fmp4 = is_fmp4;
-    if (is_fmp4) {
-        mp4->u.fmp4 = fmp4_writer_create(buffer, param, flags);
-    } else {
-        mp4->u.mov = mov_writer_create(buffer, param, flags);
-    }
-    return mp4;
-}
-
-void mp4_writer_destroy(mp4_writer_t* mp4){
-    if (mp4->is_fmp4) {
-        fmp4_writer_destroy(mp4->u.fmp4);
-    } else {
-        mov_writer_destroy(mp4->u.mov);
-    }
-    free(mp4);
-}
-
-int mp4_writer_add_audio(mp4_writer_t* mp4, uint8_t object, int channel_count, int bits_per_sample, int sample_rate, const void* extra_data, size_t extra_data_size){
-    if (mp4->is_fmp4) {
-        return fmp4_writer_add_audio(mp4->u.fmp4, object, channel_count, bits_per_sample, sample_rate, extra_data, extra_data_size);
-    } else {
-        return mov_writer_add_audio(mp4->u.mov, object, channel_count, bits_per_sample, sample_rate, extra_data, extra_data_size);
-    }
-}
-
-int mp4_writer_add_video(mp4_writer_t* mp4, uint8_t object, int width, int height, const void* extra_data, size_t extra_data_size){
-    if (mp4->is_fmp4) {
-        return fmp4_writer_add_video(mp4->u.fmp4, object, width, height, extra_data, extra_data_size);
-    } else {
-        return mov_writer_add_video(mp4->u.mov, object, width, height, extra_data, extra_data_size);
-    }
-}
-
-int mp4_writer_add_subtitle(mp4_writer_t* mp4, uint8_t object, const void* extra_data, size_t extra_data_size){
-    if (mp4->is_fmp4) {
-        return fmp4_writer_add_subtitle(mp4->u.fmp4, object, extra_data, extra_data_size);
-    } else {
-        return mov_writer_add_subtitle(mp4->u.mov, object, extra_data, extra_data_size);
-    }
-}
-
-int mp4_writer_write(mp4_writer_t* mp4, int track, const void* data, size_t bytes, int64_t pts, int64_t dts, int flags){
-    if (mp4->is_fmp4) {
-        return fmp4_writer_write(mp4->u.fmp4, track, data, bytes, pts, dts, flags);
-    } else {
-        return mov_writer_write(mp4->u.mov, track, data, bytes, pts, dts, flags);
-    }
-}
-
-int mp4_writer_write_l(mp4_writer_t* mp4, int track, const void* data, size_t bytes, int64_t pts, int64_t dts, int flags, int add_nalu_size){
-    if (mp4->is_fmp4) {
-        return fmp4_writer_write_l(mp4->u.fmp4, track, data, bytes, pts, dts, flags, add_nalu_size);
-    } else {
-        return mov_writer_write_l(mp4->u.mov, track, data, bytes, pts, dts, flags, add_nalu_size);
-    }
-}
-
-int mp4_writer_save_segment(mp4_writer_t* mp4){
-    if (mp4->is_fmp4) {
-        return fmp4_writer_save_segment(mp4->u.fmp4);
-    } else {
-        return -1;
-    }
-}
-
-int mp4_writer_init_segment(mp4_writer_t* mp4){
-    if (mp4->is_fmp4) {
-        return fmp4_writer_init_segment(mp4->u.fmp4);
-    } else {
-        return -1;
-    }
-}
-
-/////////////////////////////////////////////////MP4FileIO/////////////////////////////////////////////////
 
 static struct mov_buffer_t s_io = {
         [](void *ctx, void *data, uint64_t bytes) {
@@ -115,13 +28,13 @@ static struct mov_buffer_t s_io = {
             MP4FileIO *thiz = (MP4FileIO *) ctx;
             return thiz->onWrite(data, bytes);
         },
-        [](void *ctx, uint64_t offset) {
+        [](void *ctx, int64_t offset) {
             MP4FileIO *thiz = (MP4FileIO *) ctx;
             return thiz->onSeek(offset);
         },
         [](void *ctx) {
             MP4FileIO *thiz = (MP4FileIO *) ctx;
-            return thiz->onTell();
+            return (int64_t)thiz->onTell();
         }
 };
 
@@ -197,14 +110,14 @@ void MP4FileDisk::closeFile() {
     _file = nullptr;
 }
 
-int MP4FileDisk::onRead(void *data, uint64_t bytes) {
+int MP4FileDisk::onRead(void *data, size_t bytes) {
     if (bytes == fread(data, 1, bytes, _file.get())){
         return 0;
     }
     return 0 != ferror(_file.get()) ? ferror(_file.get()) : -1 /*EOF*/;
 }
 
-int MP4FileDisk::onWrite(const void *data, uint64_t bytes) {
+int MP4FileDisk::onWrite(const void *data, size_t bytes) {
     return bytes == fwrite(data, 1, bytes, _file.get()) ? 0 : ferror(_file.get());
 }
 
@@ -225,7 +138,7 @@ string MP4FileMemory::getAndClearMemory(){
     return ret;
 }
 
-uint64_t MP4FileMemory::fileSize() const{
+size_t MP4FileMemory::fileSize() const{
     return _memory.size();
 }
 
@@ -241,7 +154,7 @@ int MP4FileMemory::onSeek(uint64_t offset){
     return 0;
 }
 
-int MP4FileMemory::onRead(void *data, uint64_t bytes){
+int MP4FileMemory::onRead(void *data, size_t bytes){
     if (_offset >= _memory.size()) {
         //EOF
         return -1;
@@ -252,7 +165,7 @@ int MP4FileMemory::onRead(void *data, uint64_t bytes){
     return 0;
 }
 
-int MP4FileMemory::onWrite(const void *data, uint64_t bytes){
+int MP4FileMemory::onWrite(const void *data, size_t bytes){
     if (_offset + bytes > _memory.size()) {
         //需要扩容
         _memory.resize(_offset + bytes);

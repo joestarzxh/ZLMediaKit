@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -11,11 +11,20 @@
 #include <assert.h>
 #include "mk_pusher.h"
 #include "Pusher/MediaPusher.h"
+
+using namespace toolkit;
 using namespace mediakit;
 
 API_EXPORT mk_pusher API_CALL mk_pusher_create(const char *schema,const char *vhost,const char *app, const char *stream){
     assert(schema && vhost && app && schema);
     MediaPusher::Ptr *obj = new MediaPusher::Ptr(new MediaPusher(schema,vhost,app,stream));
+    return obj;
+}
+
+API_EXPORT mk_pusher API_CALL mk_pusher_create_src(mk_media_source ctx){
+    assert(ctx);
+    MediaSource *src = (MediaSource *)ctx;
+    MediaPusher::Ptr *obj = new MediaPusher::Ptr(new MediaPusher(src->shared_from_this()));
     return obj;
 }
 
@@ -28,7 +37,7 @@ API_EXPORT void API_CALL mk_pusher_release(mk_pusher ctx){
 API_EXPORT void API_CALL mk_pusher_set_option(mk_pusher ctx, const char *key, const char *val){
     assert(ctx && key && val);
     MediaPusher::Ptr &obj = *((MediaPusher::Ptr *)ctx);
-    string key_str(key),val_str(val);
+    std::string key_str(key), val_str(val);
     obj->getPoller()->async([obj,key_str,val_str](){
         //切换线程再操作
         (*obj)[key_str] = val_str;
@@ -38,7 +47,7 @@ API_EXPORT void API_CALL mk_pusher_set_option(mk_pusher ctx, const char *key, co
 API_EXPORT void API_CALL mk_pusher_publish(mk_pusher ctx,const char *url){
     assert(ctx && url);
     MediaPusher::Ptr &obj = *((MediaPusher::Ptr *)ctx);
-    string url_str(url);
+    std::string url_str(url);
     obj->getPoller()->async([obj,url_str](){
         //切换线程再操作
         obj->publish(url_str);

@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -13,6 +13,7 @@
 #include "Util/onceToken.h"
 
 using namespace toolkit;
+using namespace std;
 
 namespace mediakit {
 
@@ -74,8 +75,7 @@ void UDPServer::onErr(const string &key, const SockException &err) {
 }
 
 void UDPServer::onRecv(int interleaved, const Buffer::Ptr &buf, struct sockaddr* peer_addr) {
-    struct sockaddr_in *in = (struct sockaddr_in *) peer_addr;
-    string peer_ip = SockUtil::inet_ntoa(in->sin_addr);
+    string peer_ip = SockUtil::inet_ntoa(peer_addr);
     lock_guard<mutex> lck(_mtx_on_recv);
     auto it0 = _on_recv_map.find(peer_ip);
     if (it0 == _on_recv_map.end()) {

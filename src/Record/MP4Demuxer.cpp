@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -17,20 +17,29 @@
 #include "Extension/G711.h"
 #include "Extension/Opus.h"
 using namespace toolkit;
+using namespace std;
+
 namespace mediakit {
 
 MP4Demuxer::MP4Demuxer() {}
 
 MP4Demuxer::~MP4Demuxer() {
-    _mov_reader = nullptr;
-    closeFile();
+    closeMP4();
 }
 
-void MP4Demuxer::openMP4(const string &file){
-    openFile(file.data(),"rb+");
-    _mov_reader = createReader();
+void MP4Demuxer::openMP4(const string &file) {
+    closeMP4();
+
+    _mp4_file = std::make_shared<MP4FileDisk>();
+    _mp4_file->openFile(file.data(), "rb+");
+    _mov_reader = _mp4_file->createReader();
     getAllTracks();
     _duration_ms = mov_reader_getduration(_mov_reader.get());
+}
+
+void MP4Demuxer::closeMP4() {
+    _mov_reader.reset();
+    _mp4_file.reset();
 }
 
 int MP4Demuxer::getAllTracks() {
@@ -89,7 +98,7 @@ void MP4Demuxer::onVideoTrack(uint32_t track, uint8_t object, int width, int hei
 
             struct mpeg4_avc_t avc = {0};
             if (mpeg4_avc_decoder_configuration_record_load((uint8_t *) extra, bytes, &avc) > 0) {
-                uint8_t config[1024] = {0};
+                uint8_t config[1024 * 10] = {0};
                 int size = mpeg4_avc_to_nalu(&avc, config, sizeof(config));
                 if (size > 0) {
                     video->inputFrame(std::make_shared<H264FrameNoCacheAble>((char *)config, size, 0, 4));
@@ -103,7 +112,7 @@ void MP4Demuxer::onVideoTrack(uint32_t track, uint8_t object, int width, int hei
 
             struct mpeg4_hevc_t hevc = {0};
             if (mpeg4_hevc_decoder_configuration_record_load((uint8_t *) extra, bytes, &hevc) > 0) {
-                uint8_t config[1024] = {0};
+                uint8_t config[1024 * 10] = {0};
                 int size = mpeg4_hevc_to_nalu(&hevc, config, sizeof(config));
                 if (size > 0) {
                     video->inputFrame(std::make_shared<H265FrameNoCacheAble>((char *) config, size, 0, 4));
@@ -165,24 +174,22 @@ struct Context{
 Frame::Ptr MP4Demuxer::readFrame(bool &keyFrame, bool &eof) {
     keyFrame = false;
     eof = false;
-    static mov_reader_onread mov_reader_onread = [](void *param, uint32_t track_id, const void *buffer, size_t bytes, int64_t pts, int64_t dts, int flags) {
+
+    static mov_reader_onread2 mov_onalloc = [](void *param, uint32_t track_id, size_t bytes, int64_t pts, int64_t dts, int flags) -> void * {
         Context *ctx = (Context *) param;
         ctx->pts = pts;
         ctx->dts = dts;
         ctx->flags = flags;
         ctx->track_id = track_id;
-    };
 
-    static mov_onalloc mov_onalloc = [](void *param, int bytes) -> void * {
-        Context *ctx = (Context *) param;
-        ctx->buffer = ctx->thiz->_buffer_pool.obtain();
+        ctx->buffer = ctx->thiz->_buffer_pool.obtain2();
         ctx->buffer->setCapacity(bytes + DATA_OFFSET + 1);
         ctx->buffer->setSize(bytes + DATA_OFFSET);
         return ctx->buffer->data() + DATA_OFFSET;
     };
 
     Context ctx = {this, 0};
-    auto ret = mov_reader_read2(_mov_reader.get(), mov_onalloc, mov_reader_onread, &ctx);
+    auto ret = mov_reader_read2(_mov_reader.get(), mov_onalloc, &ctx);
     switch (ret) {
         case 0 : {
             eof = true;
@@ -210,6 +217,7 @@ Frame::Ptr MP4Demuxer::makeFrame(uint32_t track_id, const Buffer::Ptr &buf, int6
     auto bytes = buf->size() - DATA_OFFSET;
     auto data = buf->data() + DATA_OFFSET;
     auto codec = it->second->getCodecId();
+    Frame::Ptr ret;
     switch (codec) {
         case CodecH264 :
         case CodecH265 : {
@@ -221,13 +229,15 @@ Frame::Ptr MP4Demuxer::makeFrame(uint32_t track_id, const Buffer::Ptr &buf, int6
                 if (frame_len + offset + 4 > bytes) {
                     return nullptr;
                 }
-                memcpy(data + offset, "\x0\x0\x0\x1", 4);
+                memcpy(data + offset, "\x00\x00\x00\x01", 4);
                 offset += (frame_len + 4);
             }
             if (codec == CodecH264) {
-                return std::make_shared<FrameWrapper<H264FrameNoCacheAble> >(buf, dts, pts, 4, DATA_OFFSET);
+                ret = std::make_shared<FrameWrapper<H264FrameNoCacheAble> >(buf, (uint32_t)dts, (uint32_t)pts, 4, DATA_OFFSET);
+                break;
             }
-            return std::make_shared<FrameWrapper<H265FrameNoCacheAble> >(buf, dts, pts, 4, DATA_OFFSET);
+            ret = std::make_shared<FrameWrapper<H265FrameNoCacheAble> >(buf, (uint32_t)dts, (uint32_t)pts, 4, DATA_OFFSET);
+            break;
         }
 
         case CodecAAC: {
@@ -235,17 +245,23 @@ Frame::Ptr MP4Demuxer::makeFrame(uint32_t track_id, const Buffer::Ptr &buf, int6
             assert(track);
             //加上adts头
             dumpAacConfig(track->getAacCfg(), buf->size() - DATA_OFFSET, (uint8_t *) buf->data() + (DATA_OFFSET - ADTS_HEADER_LEN), ADTS_HEADER_LEN);
-            return std::make_shared<FrameWrapper<FrameFromPtr> >(buf, dts, pts, ADTS_HEADER_LEN, DATA_OFFSET - ADTS_HEADER_LEN, codec);
+            ret = std::make_shared<FrameWrapper<FrameFromPtr> >(buf, (uint32_t)dts, (uint32_t)pts, ADTS_HEADER_LEN, DATA_OFFSET - ADTS_HEADER_LEN, codec);
+            break;
         }
 
         case CodecOpus:
         case CodecG711A:
         case CodecG711U: {
-            return std::make_shared<FrameWrapper<FrameFromPtr> >(buf, dts, pts, 0, DATA_OFFSET, codec);
+            ret = std::make_shared<FrameWrapper<FrameFromPtr> >(buf, (uint32_t)dts, (uint32_t)pts, 0, DATA_OFFSET, codec);
+            break;
         }
 
         default: return nullptr;
     }
+    if (ret) {
+        it->second->inputFrame(ret);
+    }
+    return ret;
 }
 
 vector<Track::Ptr> MP4Demuxer::getTracks(bool trackReady) const {

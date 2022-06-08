@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -18,83 +18,81 @@
 #include "AACRtp.h"
 #include "H265Rtp.h"
 #include "CommonRtp.h"
+#include "G711Rtp.h"
 #include "Opus.h"
 #include "G711.h"
+#include "L16.h"
 #include "Common/Parser.h"
+
+using namespace std;
 
 namespace mediakit{
 
 Track::Ptr Factory::getTrackBySdp(const SdpTrack::Ptr &track) {
-    if (strcasecmp(track->_codec.data(), "mpeg4-generic") == 0) {
-        string aac_cfg_str = FindField(track->_fmtp.data(), "config=", nullptr);
-        if (aac_cfg_str.empty()) {
-            aac_cfg_str = FindField(track->_fmtp.data(), "config=", ";");
+    auto codec = getCodecId(track->_codec);
+    if (codec == CodecInvalid) {
+        //根据传统的payload type 获取编码类型以及采样率等信息
+        codec = RtpPayload::getCodecId(track->_pt);
+    }
+    switch (codec) {
+        case CodecG711A:
+        case CodecG711U: return std::make_shared<G711Track>(codec, track->_samplerate, track->_channel, 16);
+        case CodecL16:  return std::make_shared<L16Track>(track->_samplerate, track->_channel);
+        case CodecOpus : return std::make_shared<OpusTrack>();
+
+        case CodecAAC : {
+            string aac_cfg_str = FindField(track->_fmtp.data(), "config=", ";");
+            if (aac_cfg_str.empty()) {
+                aac_cfg_str = FindField(track->_fmtp.data(), "config=", nullptr);
+            }
+            if (aac_cfg_str.empty()) {
+                //如果sdp中获取不到aac config信息，那么在rtp也无法获取，那么忽略该Track
+                return nullptr;
+            }
+            string aac_cfg;
+            for (size_t i = 0; i < aac_cfg_str.size() / 2; ++i) {
+                unsigned int cfg;
+                sscanf(aac_cfg_str.substr(i * 2, 2).data(), "%02X", &cfg);
+                cfg &= 0x00FF;
+                aac_cfg.push_back((char) cfg);
+            }
+            return std::make_shared<AACTrack>(aac_cfg);
         }
-        if (aac_cfg_str.empty()) {
-            //如果sdp中获取不到aac config信息，那么在rtp也无法获取，那么忽略该Track
+
+        case CodecH264 : {
+            //a=fmtp:96 packetization-mode=1;profile-level-id=42C01F;sprop-parameter-sets=Z0LAH9oBQBboQAAAAwBAAAAPI8YMqA==,aM48gA==
+            auto map = Parser::parseArgs(track->_fmtp, ";", "=");
+            auto sps_pps = map["sprop-parameter-sets"];
+            string base64_SPS = FindField(sps_pps.data(), NULL, ",");
+            string base64_PPS = FindField(sps_pps.data(), ",", NULL);
+            auto sps = decodeBase64(base64_SPS);
+            auto pps = decodeBase64(base64_PPS);
+            if (sps.empty() || pps.empty()) {
+                //如果sdp里面没有sps/pps,那么可能在后续的rtp里面恢复出sps/pps
+                return std::make_shared<H264Track>();
+            }
+            return std::make_shared<H264Track>(sps, pps, 0, 0);
+        }
+
+        case CodecH265: {
+            //a=fmtp:96 sprop-sps=QgEBAWAAAAMAsAAAAwAAAwBdoAKAgC0WNrkky/AIAAADAAgAAAMBlQg=; sprop-pps=RAHA8vA8kAA=
+            auto map = Parser::parseArgs(track->_fmtp, ";", "=");
+            auto vps = decodeBase64(map["sprop-vps"]);
+            auto sps = decodeBase64(map["sprop-sps"]);
+            auto pps = decodeBase64(map["sprop-pps"]);
+            if (sps.empty() || pps.empty()) {
+                //如果sdp里面没有sps/pps,那么可能在后续的rtp里面恢复出sps/pps
+                return std::make_shared<H265Track>();
+            }
+            return std::make_shared<H265Track>(vps, sps, pps, 0, 0, 0);
+        }
+
+        default: {
+            //其他codec不支持
+            WarnL << "暂不支持该rtsp编码类型:" << track->getName();
             return nullptr;
         }
-        string aac_cfg;
-        for(int i = 0 ; i < aac_cfg_str.size() / 2 ; ++i ){
-            unsigned int cfg;
-            sscanf(aac_cfg_str.substr(i * 2, 2).data(), "%02X", &cfg);
-            cfg &= 0x00FF;
-            aac_cfg.push_back((char)cfg);
-        }
-        return std::make_shared<AACTrack>(aac_cfg);
     }
-
-    if (strcasecmp(track->_codec.data(), "opus") == 0) {
-        return std::make_shared<OpusTrack>();
-    }
-
-    if (strcasecmp(track->_codec.data(), "PCMA") == 0) {
-        return std::make_shared<G711Track>(CodecG711A, track->_samplerate, track->_channel, 16);
-    }
-
-    if (strcasecmp(track->_codec.data(), "PCMU") == 0) {
-        return std::make_shared<G711Track>(CodecG711U,  track->_samplerate, track->_channel, 16);
-    }
-
-    if (strcasecmp(track->_codec.data(), "h264") == 0) {
-        //a=fmtp:96 packetization-mode=1;profile-level-id=42C01F;sprop-parameter-sets=Z0LAH9oBQBboQAAAAwBAAAAPI8YMqA==,aM48gA==
-        auto map = Parser::parseArgs(FindField(track->_fmtp.data()," ", nullptr),";","=");
-        auto sps_pps = map["sprop-parameter-sets"];
-        string base64_SPS = FindField(sps_pps.data(), NULL, ",");
-        string base64_PPS = FindField(sps_pps.data(), ",", NULL);
-        auto sps = decodeBase64(base64_SPS);
-        auto pps = decodeBase64(base64_PPS);
-        if(sps.empty() || pps.empty()){
-            //如果sdp里面没有sps/pps,那么可能在后续的rtp里面恢复出sps/pps
-            return std::make_shared<H264Track>();
-        }
-
-        return std::make_shared<H264Track>(sps,pps,0,0);
-    }
-
-    if (strcasecmp(track->_codec.data(), "h265") == 0) {
-        //a=fmtp:96 sprop-sps=QgEBAWAAAAMAsAAAAwAAAwBdoAKAgC0WNrkky/AIAAADAAgAAAMBlQg=; sprop-pps=RAHA8vA8kAA=
-        auto map = Parser::parseArgs(FindField(track->_fmtp.data()," ", nullptr),";","=");
-        auto vps = decodeBase64(map["sprop-vps"]);
-        auto sps = decodeBase64(map["sprop-sps"]);
-        auto pps = decodeBase64(map["sprop-pps"]);
-        if(sps.empty() || pps.empty()){
-            //如果sdp里面没有sps/pps,那么可能在后续的rtp里面恢复出sps/pps
-            return std::make_shared<H265Track>();
-        }
-        return std::make_shared<H265Track>(vps,sps,pps,0,0,0);
-    }
-
-    //可以根据传统的payload type 获取编码类型以及采样率等信息
-    CodecId codec_id = RtpPayload::getCodecId(track->_pt);
-    switch (codec_id){
-        case CodecG711A :
-        case CodecG711U : return std::make_shared<G711Track>(codec_id,  track->_samplerate, track->_channel, 16);
-        default : break;
-    }
-
-    WarnL << "暂不支持该sdp:" << track->getName();
-    return nullptr;
 }
 
 RtpCodec::Ptr Factory::getRtpEncoderBySdp(const Sdp::Ptr &sdp) {
@@ -123,9 +121,15 @@ RtpCodec::Ptr Factory::getRtpEncoderBySdp(const Sdp::Ptr &sdp) {
         case CodecH264 : return std::make_shared<H264RtpEncoder>(ssrc, mtu, sample_rate, pt, interleaved);
         case CodecH265 : return std::make_shared<H265RtpEncoder>(ssrc, mtu, sample_rate, pt, interleaved);
         case CodecAAC : return std::make_shared<AACRtpEncoder>(ssrc, mtu, sample_rate, pt, interleaved);
-        case CodecOpus :
+        case CodecL16 :
+        case CodecOpus : return std::make_shared<CommonRtpEncoder>(codec_id, ssrc, mtu, sample_rate, pt, interleaved);
         case CodecG711A :
-        case CodecG711U : return std::make_shared<CommonRtpEncoder>(codec_id, ssrc, mtu, sample_rate, pt, interleaved);
+        case CodecG711U : {
+            if (pt == Rtsp::PT_PCMA || pt == Rtsp::PT_PCMU) {
+                return std::make_shared<G711RtpEncoder>(codec_id, ssrc, mtu, sample_rate, pt, interleaved, 1);
+            }
+            return std::make_shared<CommonRtpEncoder>(codec_id, ssrc, mtu, sample_rate, pt, interleaved);
+        }
         default : WarnL << "暂不支持该CodecId:" << codec_id; return nullptr;
     }
 }
@@ -135,6 +139,7 @@ RtpCodec::Ptr Factory::getRtpDecoderByTrack(const Track::Ptr &track) {
         case CodecH264 : return std::make_shared<H264RtpDecoder>();
         case CodecH265 : return std::make_shared<H265RtpDecoder>();
         case CodecAAC : return std::make_shared<AACRtpDecoder>(track->clone());
+        case CodecL16 :
         case CodecOpus :
         case CodecG711A :
         case CodecG711U : return std::make_shared<CommonRtpDecoder>(track->getCodecId());

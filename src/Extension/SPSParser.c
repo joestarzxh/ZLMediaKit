@@ -712,7 +712,6 @@ static inline int decodeVuiParameters(void *pvBuf, T_SPS *ptSps)
 {
     int iAspectRatioInfoPresentFlag;
     unsigned int uiAspectRatioIdc;
-    int iChromaSampleLocation;
 
     iAspectRatioInfoPresentFlag = getOneBit(pvBuf);
 
@@ -759,8 +758,7 @@ static inline int decodeVuiParameters(void *pvBuf, T_SPS *ptSps)
     /* chroma_location_info_present_flag */
     if (getOneBit(pvBuf))
     {
-        /* chroma_sample_location_type_top_field */
-        iChromaSampleLocation = parseUe(pvBuf);
+        parseUe(pvBuf);  /* chroma_sample_location_type_top_field */
         parseUe(pvBuf);  /* chroma_sample_location_type_bottom_field */
     }
     if(getBitsLeft(pvBuf) < 10)
@@ -2196,21 +2194,14 @@ int h264GetFormat(T_SPS *ptSps)
 
 void h264GeFramerate(T_SPS *ptSps, float *pfFramerate)
 {
-    int iFrInt = 0;
+
     if(ptSps->iTimingInfoPresentFlag)
     {
-        if(!ptSps->iFixedFrameRateFlag)
-        {
-            *pfFramerate = (float)ptSps->u32TimeScale / (float)ptSps->u32NumUnitsInTick;
-            //iFrInt = ptSps->vui_parameters.u32TimeScale / ptSps->vui_parameters.u32NumUnitsInTick;
-        }else
-        {
-            *pfFramerate = (float)ptSps->u32TimeScale / (float)ptSps->u32NumUnitsInTick / 2.0;
-            //iFrInt = ptSps->vui_parameters.u32TimeScale / ptSps->vui_parameters.u32NumUnitsInTick / 2;
-        }
-        iFrInt = ptSps->u32TimeScale / ptSps->u32NumUnitsInTick / 2;
+        *pfFramerate = (float)ptSps->u32TimeScale / (float)ptSps->u32NumUnitsInTick / 2.0;
+    }else{
+        *pfFramerate = 0;    
     }
-    switch(iFrInt)
+    switch((int)*pfFramerate)
     {
         case 23:// 23.98
             RPT(RPT_DBG, "frame rate:23.98");

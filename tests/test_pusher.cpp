@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -56,7 +56,7 @@ void createPusher(const EventPoller::Ptr &poller, const string &schema,const str
 
 //推流失败或断开延迟2秒后重试推流
 void rePushDelay(const EventPoller::Ptr &poller,const string &schema,const string &vhost,const string &app, const string &stream, const string &url) {
-    g_timer = std::make_shared<Timer>(2,[poller,schema,vhost,app, stream, url]() {
+    g_timer = std::make_shared<Timer>(2.0f,[poller,schema,vhost,app, stream, url]() {
         InfoL << "Re-Publishing...";
         //重新推流
         createPusher(poller,schema,vhost,app, stream, url);
@@ -75,7 +75,11 @@ int domain(const string &playUrl, const string &pushUrl) {
     //拉一个流，生成一个RtmpMediaSource，源的名称是"app/stream"
     //你也可以以其他方式生成RtmpMediaSource，比如说MP4文件（请查看test_rtmpPusherMp4.cpp代码）
     MediaInfo info(pushUrl);
-    PlayerProxy::Ptr player(new PlayerProxy(DEFAULT_VHOST, "app", "stream",false,false,-1 , poller));
+
+    ProtocolOption option;
+    option.enable_hls = false;
+    option.enable_mp4 = false;
+    PlayerProxy::Ptr player(new PlayerProxy(DEFAULT_VHOST, "app", "stream", option, -1, poller));
     //可以指定rtsp拉流方式，支持tcp和udp方式，默认tcp
 //    (*player)[Client::kRtpType] = Rtsp::RTP_UDP;
     player->play(playUrl.data());

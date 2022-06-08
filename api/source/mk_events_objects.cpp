@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -14,8 +14,16 @@
 #include "Record/MP4Recorder.h"
 #include "Http/HttpSession.h"
 #include "Http/HttpBody.h"
+
 #include "Http/HttpClient.h"
 #include "Rtsp/RtspSession.h"
+
+#ifdef ENABLE_WEBRTC
+#include "jsoncpp/json.h"
+#include "mk_webrtc_api.h"
+#endif
+
+using namespace toolkit;
 using namespace mediakit;
 
 ///////////////////////////////////////////RecordInfo/////////////////////////////////////////////
@@ -31,7 +39,7 @@ API_EXPORT float API_CALL mk_mp4_info_get_time_len(const mk_mp4_info ctx){
     return info->time_len;
 }
 
-API_EXPORT uint64_t API_CALL mk_mp4_info_get_file_size(const mk_mp4_info ctx){
+API_EXPORT size_t API_CALL mk_mp4_info_get_file_size(const mk_mp4_info ctx){
     assert(ctx);
     RecordInfo *info = (RecordInfo *)ctx;
     return info->file_size;
@@ -90,11 +98,6 @@ API_EXPORT const char* API_CALL mk_parser_get_url(const mk_parser ctx){
     Parser *parser = (Parser *)ctx;
     return parser->Url().c_str();
 }
-API_EXPORT const char* API_CALL mk_parser_get_full_url(const mk_parser ctx){
-    assert(ctx);
-    Parser *parser = (Parser *)ctx;
-    return parser->FullUrl().c_str();
-}
 API_EXPORT const char* API_CALL mk_parser_get_url_params(const mk_parser ctx){
     assert(ctx);
     Parser *parser = (Parser *)ctx;
@@ -115,7 +118,7 @@ API_EXPORT const char* API_CALL mk_parser_get_header(const mk_parser ctx,const c
     Parser *parser = (Parser *)ctx;
     return parser->getHeader()[key].c_str();
 }
-API_EXPORT const char* API_CALL mk_parser_get_content(const mk_parser ctx, int *length){
+API_EXPORT const char* API_CALL mk_parser_get_content(const mk_parser ctx, size_t *length){
     assert(ctx);
     Parser *parser = (Parser *)ctx;
     if(length){
@@ -152,7 +155,7 @@ API_EXPORT const char* API_CALL mk_media_info_get_host(const mk_media_info ctx){
 API_EXPORT uint16_t API_CALL mk_media_info_get_port(const mk_media_info ctx){
     assert(ctx);
     MediaInfo *info = (MediaInfo *)ctx;
-    return std::stoi(info->_port);
+    return info->_port;
 }
 
 API_EXPORT const char* API_CALL mk_media_info_get_app(const mk_media_info ctx){
@@ -211,6 +214,29 @@ API_EXPORT int API_CALL mk_media_source_seek_to(const mk_media_source ctx,uint32
     return src->seekTo(stamp);
 }
 
+API_EXPORT void API_CALL mk_media_source_start_send_rtp(const mk_media_source ctx, const char *dst_url, uint16_t dst_port, const char *ssrc, int is_udp, on_mk_media_source_send_rtp_result cb, void *user_data){
+    assert(ctx && dst_url && ssrc);
+    MediaSource *src = (MediaSource *)ctx;
+
+    MediaSourceEvent::SendRtpArgs args;
+    args.dst_url = dst_url;
+    args.dst_port = dst_port;
+    args.ssrc = ssrc;
+    args.is_udp = is_udp;
+
+    src->startSendRtp(args, [cb, user_data](uint16_t local_port, const SockException &ex){
+        if (cb) {
+            cb(user_data, local_port, ex.getErrCode(), ex.what());
+        }
+    });
+}
+
+API_EXPORT int API_CALL mk_media_source_stop_send_rtp(const mk_media_source ctx){
+    assert(ctx);
+    MediaSource *src = (MediaSource *) ctx;
+    return src->stopSendRtp("");
+}
+
 API_EXPORT void API_CALL mk_media_source_find(const char *schema,
                                               const char *vhost,
                                               const char *app,
@@ -222,20 +248,21 @@ API_EXPORT void API_CALL mk_media_source_find(const char *schema,
     cb(user_data, src.get());
 }
 
-API_EXPORT void API_CALL mk_media_source_for_each(void *user_data, on_mk_media_source_find_cb cb){
+API_EXPORT void API_CALL mk_media_source_for_each(void *user_data, on_mk_media_source_find_cb cb, const char *schema,
+                                                  const char *vhost, const char *app, const char *stream) {
     assert(cb);
-    MediaSource::for_each_media([&](const MediaSource::Ptr &src){
-        cb(user_data,src.get());
-    });
+    MediaSource::for_each_media([&](const MediaSource::Ptr &src) {
+        cb(user_data, src.get());
+    }, schema ? schema : "", vhost ? vhost : "", app ? app : "", stream ? stream : "");
 }
 
 ///////////////////////////////////////////HttpBody/////////////////////////////////////////////
-API_EXPORT mk_http_body API_CALL mk_http_body_from_string(const char *str,int len){
+API_EXPORT mk_http_body API_CALL mk_http_body_from_string(const char *str, size_t len){
     assert(str);
     if(!len){
         len = strlen(str);
     }
-    return new HttpBody::Ptr(new HttpStringBody(string(str,len)));
+    return new HttpBody::Ptr(new HttpStringBody(std::string(str, len)));
 }
 
 API_EXPORT mk_http_body API_CALL mk_http_body_from_file(const char *file_path){
@@ -272,7 +299,7 @@ API_EXPORT void API_CALL mk_http_body_release(mk_http_body ctx){
 
 ///////////////////////////////////////////HttpResponseInvoker/////////////////////////////////////////////
 API_EXPORT void API_CALL mk_http_response_invoker_do_string(const mk_http_response_invoker ctx,
-                                                            const char *response_code,
+                                                            int response_code,
                                                             const char **response_header,
                                                             const char *response_content){
     assert(ctx && response_code && response_header && response_content);
@@ -292,7 +319,7 @@ API_EXPORT void API_CALL mk_http_response_invoker_do_file(const mk_http_response
 }
 
 API_EXPORT void API_CALL mk_http_response_invoker_do(const mk_http_response_invoker ctx,
-                                                     const char *response_code,
+                                                     int response_code,
                                                      const char **response_header,
                                                      const mk_http_body response_body){
     assert(ctx && response_code && response_header && response_body);
@@ -301,6 +328,53 @@ API_EXPORT void API_CALL mk_http_response_invoker_do(const mk_http_response_invo
     HttpBody::Ptr *body = (HttpBody::Ptr*) response_body;
     (*invoker)(response_code,header,*body);
 }
+
+API_EXPORT void API_CALL mk_webrtc_http_response_invoker_do(const mk_http_response_invoker ctx_invoker,
+                                                            const mk_parser ctx_parser,
+                                                             const mk_sock_info ctx_sock ) {
+    assert(ctx_parser && ctx_invoker && ctx_sock);
+#ifdef ENABLE_WEBRTC
+    static auto webrtc_cb = [](API_ARGS_STRING_ASYNC){
+        CHECK_ARGS("type");
+        auto type = allArgs["type"];
+        auto offer = allArgs.getArgs();
+        CHECK(!offer.empty(), "http body(webrtc offer sdp) is empty");
+
+        WebRtcPluginManager::Instance().getAnswerSdp(
+            *(static_cast<Session *>(&sender)), type, offer, WebRtcArgsImp(allArgs, sender.getIdentifier()),
+            [invoker, val, offer, headerOut](const WebRtcInterface &exchanger) mutable {
+                //设置返回类型
+                headerOut["Content-Type"] = HttpFileManager::getContentType(".json");
+                //设置跨域
+                headerOut["Access-Control-Allow-Origin"] = "*";
+
+                try {
+                    val["sdp"] = const_cast<WebRtcInterface &>(exchanger).getAnswerSdp(offer);
+                    val["id"] = exchanger.getIdentifier();
+                    val["type"] = "answer";
+                    invoker(200, headerOut, val.toStyledString());
+                } catch (std::exception &ex) {
+                    val["code"] = API::Exception;
+                    val["msg"] = ex.what();
+                    invoker(200, headerOut, val.toStyledString());
+                }
+            });
+    };
+
+    Parser *parser = (Parser *)ctx_parser;
+    HttpSession::HttpResponseInvoker *invoker = (HttpSession::HttpResponseInvoker *)ctx_invoker;
+    SockInfo* sender = (SockInfo*)ctx_sock;
+
+    GET_CONFIG(std::string, charSet, Http::kCharSet);
+    HttpSession::KeyValue headerOut;
+    headerOut["Content-Type"] = std::string("application/json; charset=") + charSet;
+
+    Json::Value val;
+    val["code"] = API::Success;
+
+    webrtc_cb(*sender, headerOut, HttpAllArgs<std::string>(*parser, (std::string &)parser->Content()), val, *invoker);
+#endif
+};
 
 API_EXPORT mk_http_response_invoker API_CALL mk_http_response_invoker_clone(const mk_http_response_invoker ctx){
     assert(ctx);
@@ -386,7 +460,10 @@ API_EXPORT void API_CALL mk_publish_auth_invoker_do(const mk_publish_auth_invoke
                                                     int enable_mp4){
     assert(ctx);
     Broadcast::PublishAuthInvoker *invoker = (Broadcast::PublishAuthInvoker *)ctx;
-    (*invoker)(err_msg ? err_msg : "", enable_hls, enable_mp4);
+    ProtocolOption option;
+    option.enable_hls = enable_hls;
+    option.enable_mp4 = enable_mp4;
+    (*invoker)(err_msg ? err_msg : "", option);
 }
 
 API_EXPORT mk_publish_auth_invoker API_CALL mk_publish_auth_invoker_clone(const mk_publish_auth_invoker ctx){

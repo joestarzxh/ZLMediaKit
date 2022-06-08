@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -12,30 +12,40 @@
 #define MK_COMMON_H
 
 #include <stdint.h>
+#include <stddef.h>
 
-#if defined(_WIN32)
-
-#ifndef MediaKitApi_STATIC
-#if defined(MediaKitApi_EXPORTS)
-        #define API_EXPORT __declspec(dllexport)
-    #else
-        #define API_EXPORT __declspec(dllimport)
-    #endif
-
-    #define API_CALL __cdecl
-#else
-#define API_EXPORT
-#define API_CALL
+#if defined(GENERATE_EXPORT)
+#include "mk_export.h"
 #endif
 
+#if defined(_WIN32) && defined(_MSC_VER)
+#    define API_CALL __cdecl
 #else
-#define API_EXPORT
-#define API_CALL
+#    define API_CALL
+#endif
+
+#if defined(_WIN32) && defined(_MSC_VER)
+#    if !defined(GENERATE_EXPORT)
+#        if defined(MediaKitApi_EXPORTS)
+#            define API_EXPORT __declspec(dllexport)
+#        else
+#            define API_EXPORT __declspec(dllimport)
+#        endif
+#    endif
+#elif !defined(GENERATE_EXPORT)
+#   define API_EXPORT
 #endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+//输出日志到shell
+#define LOG_CONSOLE     (1 << 0)
+//输出日志到文件
+#define LOG_FILE        (1 << 1)
+//输出日志到回调函数(mk_events::on_mk_log)
+#define LOG_CALLBACK    (1 << 2)
 
 typedef struct {
     // 线程数
@@ -43,6 +53,8 @@ typedef struct {
 
     // 日志级别,支持0~4
     int log_level;
+    //控制日志输出的掩模，请查看LOG_CONSOLE、LOG_FILE、LOG_CALLBACK等宏
+    int log_mask;
     //文件日志保存路径,路径可以不存在(内部可以创建文件夹)，设置为NULL关闭日志输出至文件
     const char *log_file_path;
     //文件日志保存天数,设置为0关闭日志文件
@@ -76,6 +88,7 @@ API_EXPORT void API_CALL mk_stop_all_server();
  * 基础类型参数版本的mk_env_init，为了方便其他语言调用
  * @param thread_num 线程数
  * @param log_level 日志级别,支持0~4
+ * @param log_mask 日志输出方式掩模，请查看LOG_CONSOLE、LOG_FILE、LOG_CALLBACK等宏
  * @param log_file_path 文件日志保存路径,路径可以不存在(内部可以创建文件夹)，设置为NULL关闭日志输出至文件
  * @param log_file_days 文件日志保存天数,设置为0关闭日志文件
  * @param ini_is_path 配置文件是内容还是路径
@@ -86,6 +99,7 @@ API_EXPORT void API_CALL mk_stop_all_server();
  */
 API_EXPORT void API_CALL mk_env_init1(int thread_num,
                                       int log_level,
+                                      int log_mask,
                                       const char *log_file_path,
                                       int log_file_days,
                                       int ini_is_path,
@@ -93,6 +107,13 @@ API_EXPORT void API_CALL mk_env_init1(int thread_num,
                                       int ssl_is_path,
                                       const char *ssl,
                                       const char *ssl_pwd);
+
+/**
+* 设置日志文件
+* @param file_max_size 单个切片文件大小(MB)
+* @param file_max_count 切片文件个数
+*/
+API_EXPORT void API_CALL mk_set_log(int file_max_size, int file_max_count);
 
 /**
  * 设置配置项
@@ -138,6 +159,14 @@ API_EXPORT uint16_t API_CALL mk_rtmp_server_start(uint16_t port, int ssl);
  * @return 0:失败,非0:端口号
  */
 API_EXPORT uint16_t API_CALL mk_rtp_server_start(uint16_t port);
+
+/**
+ * 创建rtc服务器
+ * @param port rtp监听端口
+ * @return 0:失败,非0:端口号
+ */
+API_EXPORT uint16_t API_CALL mk_rtc_server_start(uint16_t port);
+
 
 /**
  * 创建shell服务器

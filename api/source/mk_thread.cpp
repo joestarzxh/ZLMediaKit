@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -44,6 +44,15 @@ API_EXPORT void API_CALL mk_async_do(mk_thread ctx,on_mk_async cb, void *user_da
     });
 }
 
+API_EXPORT void API_CALL mk_async_do_delay(mk_thread ctx, size_t ms, on_mk_async cb, void *user_data) {
+    assert(ctx && cb && ms);
+    EventPoller *poller = (EventPoller *) ctx;
+    poller->doDelayTask(ms, [cb, user_data]() {
+        cb(user_data);
+        return 0;
+    });
+}
+
 API_EXPORT void API_CALL mk_sync_do(mk_thread ctx,on_mk_async cb, void *user_data){
     assert(ctx && cb);
     EventPoller *poller = (EventPoller *)ctx;
@@ -77,7 +86,7 @@ public:
         _task->cancel();
     }
 
-    void start(int ms ,EventPoller &poller){
+    void start(uint64_t ms ,EventPoller &poller){
         weak_ptr<TimerForC> weak_self = shared_from_this();
         _task = poller.doDelayTask(ms, [weak_self]() {
             auto strong_self = weak_self.lock();
@@ -91,7 +100,7 @@ private:
     on_mk_timer _cb = nullptr;
     void *_user_data = nullptr;
     recursive_mutex _mxt;
-    DelayTask::Ptr _task;
+    EventPoller::DelayTask::Ptr _task;
 };
 
 API_EXPORT mk_timer API_CALL mk_timer_create(mk_thread ctx,uint64_t delay_ms,on_mk_timer cb, void *user_data){
@@ -107,4 +116,52 @@ API_EXPORT void API_CALL mk_timer_release(mk_timer ctx){
     TimerForC::Ptr *obj = (TimerForC::Ptr *)ctx;
     (*obj)->cancel();
     delete obj;
+}
+
+class WorkThreadPoolForC : public TaskExecutorGetterImp {
+public:
+    ~WorkThreadPoolForC() override = default;
+
+    WorkThreadPoolForC(const char *name, size_t n_thread, int priority) {
+        //最低优先级
+        addPoller(name, n_thread, (ThreadPool::Priority) priority, false);
+    }
+
+    EventPoller::Ptr getPoller() {
+        return dynamic_pointer_cast<EventPoller>(getExecutor());
+    }
+};
+
+API_EXPORT mk_thread_pool API_CALL mk_thread_pool_create(const char *name, size_t n_thread, int priority) {
+    return new WorkThreadPoolForC(name, n_thread, priority);
+}
+
+API_EXPORT int API_CALL mk_thread_pool_release(mk_thread_pool pool) {
+    assert(pool);
+    delete (WorkThreadPoolForC *) pool;
+    return 0;
+}
+
+API_EXPORT mk_thread API_CALL mk_thread_from_thread_pool(mk_thread_pool pool) {
+    assert(pool);
+    return ((WorkThreadPoolForC *) pool)->getPoller().get();
+}
+
+API_EXPORT mk_sem API_CALL mk_sem_create() {
+    return new toolkit::semaphore;
+}
+
+API_EXPORT void API_CALL mk_sem_release(mk_sem sem) {
+    assert(sem);
+    delete (toolkit::semaphore *) sem;
+}
+
+API_EXPORT void API_CALL mk_sem_post(mk_sem sem, size_t n) {
+    assert(sem);
+    ((toolkit::semaphore *) sem)->post(n);
+}
+
+API_EXPORT void API_CALL mk_sem_wait(mk_sem sem) {
+    assert(sem);
+    ((toolkit::semaphore *) sem)->wait();
 }

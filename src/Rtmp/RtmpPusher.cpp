@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -13,8 +13,9 @@
 #include "Util/util.h"
 #include "Util/onceToken.h"
 #include "Thread/ThreadPool.h"
+
+using namespace std;
 using namespace toolkit;
-using namespace mediakit::Client;
 
 namespace mediakit {
 
@@ -32,21 +33,16 @@ void RtmpPusher::teardown() {
         _app.clear();
         _stream_id.clear();
         _tc_url.clear();
-        {
-            lock_guard<recursive_mutex> lck(_mtx_on_result);
-            _map_on_result.clear();
-        }
-        {
-            lock_guard<recursive_mutex> lck(_mtx_on_status);
-            _deque_on_status.clear();
-        }
+        _map_on_result.clear();
+        _deque_on_status.clear();
         _publish_timer.reset();
         reset();
         shutdown(SockException(Err_shutdown, "teardown"));
     }
 }
 
-void RtmpPusher::onPublishResult(const SockException &ex, bool handshake_done) {
+void RtmpPusher::onPublishResult_l(const SockException &ex, bool handshake_done) {
+    DebugL << ex.what();
     if (ex.getErrCode() == Err_shutdown) {
         //主动shutdown的，不触发回调
         return;
@@ -54,18 +50,14 @@ void RtmpPusher::onPublishResult(const SockException &ex, bool handshake_done) {
     if (!handshake_done) {
         //播放结果回调
         _publish_timer.reset();
-        if (_on_published) {
-            _on_published(ex);
-        }
+        onPublishResult(ex);
     } else {
         //播放成功后异常断开回调
-        if (_on_shutdown) {
-            _on_shutdown(ex);
-        }
+        onShutdown(ex);
     }
 
     if (ex) {
-        teardown();
+        shutdown(SockException(Err_shutdown,"teardown"));
     }
 }
 
@@ -77,51 +69,42 @@ void RtmpPusher::publish(const string &url)  {
     _tc_url = string("rtmp://") + host_url + "/" + _app;
 
     if (!_app.size() || !_stream_id.size()) {
-        onPublishResult(SockException(Err_other, "rtmp url非法"), false);
+        onPublishResult_l(SockException(Err_other, "rtmp url非法"), false);
         return;
     }
     DebugL << host_url << " " << _app << " " << _stream_id;
 
-    auto iPort = atoi(FindField(host_url.data(), ":", NULL).data());
-    if (iPort <= 0) {
-        //rtmp 默认端口1935
-        iPort = 1935;
-    } else {
-        //服务器域名
-        host_url = FindField(host_url.data(), NULL, ":");
-    }
+    uint16_t port = 1935;
+    splitUrl(host_url, host_url, port);
 
     weak_ptr<RtmpPusher> weakSelf = dynamic_pointer_cast<RtmpPusher>(shared_from_this());
-    float publishTimeOutSec = (*this)[kTimeoutMS].as<int>() / 1000.0;
+    float publishTimeOutSec = (*this)[Client::kTimeoutMS].as<int>() / 1000.0f;
     _publish_timer.reset(new Timer(publishTimeOutSec, [weakSelf]() {
         auto strongSelf = weakSelf.lock();
         if (!strongSelf) {
             return false;
         }
-        strongSelf->onPublishResult(SockException(Err_timeout, "publish rtmp timeout"), false);
+        strongSelf->onPublishResult_l(SockException(Err_timeout, "publish rtmp timeout"), false);
         return false;
     }, getPoller()));
 
-    if (!(*this)[kNetAdapter].empty()) {
-        setNetAdapter((*this)[kNetAdapter]);
+    if (!(*this)[Client::kNetAdapter].empty()) {
+        setNetAdapter((*this)[Client::kNetAdapter]);
     }
 
-    startConnect(host_url, iPort);
+    startConnect(host_url, port);
 }
 
 void RtmpPusher::onErr(const SockException &ex){
     //定时器_pPublishTimer为空后表明握手结束了
-    onPublishResult(ex, !_publish_timer);
+    onPublishResult_l(ex, !_publish_timer);
 }
 
 void RtmpPusher::onConnect(const SockException &err){
     if (err) {
-        onPublishResult(err, false);
+        onPublishResult_l(err, false);
         return;
     }
-    //推流器不需要多大的接收缓存，节省内存占用
-    getSock()->setReadBuffer(std::make_shared<BufferRaw>(1 * 1024));
-
     weak_ptr<RtmpPusher> weak_self = dynamic_pointer_cast<RtmpPusher>(shared_from_this());
     startClientSession([weak_self]() {
         auto strong_self = weak_self.lock();
@@ -140,7 +123,7 @@ void RtmpPusher::onRecv(const Buffer::Ptr &buf){
     } catch (exception &e) {
         SockException ex(Err_other, e.what());
         //定时器_pPublishTimer为空后表明握手结束了
-        onPublishResult(ex, !_publish_timer);
+        onPublishResult_l(ex, !_publish_timer);
     }
 }
 
@@ -175,9 +158,10 @@ inline void RtmpPusher::send_createStream() {
     });
 }
 
+#define RTMP_STREAM_LIVE    "live"
 inline void RtmpPusher::send_publish() {
     AMFEncoder enc;
-    enc << "publish" << ++_send_req_id << nullptr << _stream_id << _app;
+    enc << "publish" << ++_send_req_id << nullptr << _stream_id << RTMP_STREAM_LIVE;
     sendRequest(MSG_CMD, enc.data());
 
     addOnStatusCB([this](AMFValue &val) {
@@ -205,6 +189,7 @@ inline void RtmpPusher::send_metaData(){
         sendRtmp(pkt->type_id, _stream_index, pkt, pkt->time_stamp, pkt->chunk_id);
     });
 
+    src->pause(false);
     _rtmp_reader = src->getRing()->attach(getPoller());
     weak_ptr<RtmpPusher> weak_self = dynamic_pointer_cast<RtmpPusher>(shared_from_this());
     _rtmp_reader->setReadCB([weak_self](const RtmpMediaSource::RingDataType &pkt) {
@@ -213,8 +198,8 @@ inline void RtmpPusher::send_metaData(){
             return;
         }
 
-        int i = 0;
-        int size = pkt->size();
+        size_t i = 0;
+        auto size = pkt->size();
         strong_self->setSendFlushFlag(false);
         pkt->for_each([&](const RtmpPacket::Ptr &rtmp) {
             if (++i == size) {
@@ -226,10 +211,10 @@ inline void RtmpPusher::send_metaData(){
     _rtmp_reader->setDetachCB([weak_self]() {
         auto strong_self = weak_self.lock();
         if (strong_self) {
-            strong_self->onPublishResult(SockException(Err_other, "媒体源被释放"), !strong_self->_publish_timer);
+            strong_self->onPublishResult_l(SockException(Err_other, "媒体源被释放"), !strong_self->_publish_timer);
         }
     });
-    onPublishResult(SockException(Err_success, "success"), false);
+    onPublishResult_l(SockException(Err_success, "success"), false);
     //提升发送性能
     setSocketFlags();
 }
@@ -245,7 +230,6 @@ void RtmpPusher::setSocketFlags(){
 
 void RtmpPusher::onCmd_result(AMFDecoder &dec){
     auto req_id = dec.load<int>();
-    lock_guard<recursive_mutex> lck(_mtx_on_result);
     auto it = _map_on_result.find(req_id);
     if (it != _map_on_result.end()) {
         it->second(dec);
@@ -267,7 +251,6 @@ void RtmpPusher::onCmd_onStatus(AMFDecoder &dec) {
         throw std::runtime_error("onStatus:the result object was not found");
     }
 
-    lock_guard<recursive_mutex> lck(_mtx_on_status);
     if (_deque_on_status.size()) {
         _deque_on_status.front()(val);
         _deque_on_status.pop_front();
@@ -282,7 +265,8 @@ void RtmpPusher::onCmd_onStatus(AMFDecoder &dec) {
     }
 }
 
-void RtmpPusher::onRtmpChunk(RtmpPacket &chunk_data) {
+void RtmpPusher::onRtmpChunk(RtmpPacket::Ptr packet) {
+    auto &chunk_data = *packet;
     switch (chunk_data.type_id) {
         case MSG_CMD:
         case MSG_CMD3: {
@@ -294,7 +278,7 @@ void RtmpPusher::onRtmpChunk(RtmpPacket &chunk_data) {
                 g_mapCmd.emplace("onStatus", &RtmpPusher::onCmd_onStatus);
             });
 
-            AMFDecoder dec(chunk_data.buffer, 0);
+            AMFDecoder dec(chunk_data.buffer, 0, chunk_data.type_id == MSG_CMD3 ? 3 : 0);
             std::string type = dec.load<std::string>();
             auto it = g_mapCmd.find(type);
             if (it != g_mapCmd.end()) {

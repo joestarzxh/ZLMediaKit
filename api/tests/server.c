@@ -1,25 +1,15 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
  * may be found in the AUTHORS file in the root of the source tree.
  */
 
-#include <signal.h>
 #include <string.h>
 #include "mk_mediakit.h"
-
-#ifdef _WIN32
-#include "windows.h"
-#else
-
-#include "unistd.h"
-
-#endif
-
 #define LOG_LEV 4
 
 /**
@@ -160,27 +150,33 @@ void API_CALL on_mk_http_request(const mk_parser parser,
                mk_parser_get_content(parser,NULL));
 
     const char *url = mk_parser_get_url(parser);
-    if(strcmp(url,"/api/test") != 0){
+    *consumed = 1;
+
+    //拦截api: /api/test
+    if(strcmp(url,"/api/test") == 0) {
+        const char *response_header[] = { "Content-Type", "text/html", NULL };
+        const char *content = "<html>"
+                              "<head>"
+                              "<title>hello world</title>"
+                              "</head>"
+                              "<body bgcolor=\"white\">"
+                              "<center><h1>hello world</h1></center><hr>"
+                              "<center>"
+                              "ZLMediaKit-4.0</center>"
+                              "</body>"
+                              "</html>";
+        mk_http_body body = mk_http_body_from_string(content, 0);
+        mk_http_response_invoker_do(invoker, 200, response_header, body);
+        mk_http_body_release(body);
+    }
+    //拦截api: /index/api/webrtc
+    else if(strcmp(url,"/index/api/webrtc") == 0){
+        mk_webrtc_http_response_invoker_do(invoker,parser,sender);
+    }
+    else{
         *consumed = 0;
         return;
     }
-
-    //只拦截api: /api/test
-    *consumed = 1;
-    const char *response_header[] = {"Content-Type","text/html",NULL};
-    const char *content =
-                    "<html>"
-                    "<head>"
-                    "<title>hello world</title>"
-                    "</head>"
-                    "<body bgcolor=\"white\">"
-                    "<center><h1>hello world</h1></center><hr>"
-                    "<center>""ZLMediaKit-4.0</center>"
-                    "</body>"
-                    "</html>";
-    mk_http_body body = mk_http_body_from_string(content,0);
-    mk_http_response_invoker_do(invoker, "200 OK", response_header, body);
-    mk_http_body_release(body);
 }
 
 /**
@@ -371,8 +367,8 @@ void API_CALL on_mk_shell_login(const char *user_name,
  * @param peer_port 客户端端口号
  */
 void API_CALL on_mk_flow_report(const mk_media_info url_info,
-                                uint64_t total_bytes,
-                                uint64_t total_seconds,
+                                size_t total_bytes,
+                                size_t total_seconds,
                                 int is_player,
                                 const mk_sock_info sender) {
     char ip[64];
@@ -390,10 +386,6 @@ void API_CALL on_mk_flow_report(const mk_media_info url_info,
               (int)mk_sock_info_peer_port(sender));
 }
 
-static int flag = 1;
-static void s_on_exit(int sig){
-    flag = 0;
-}
 int main(int argc, char *argv[]) {
     char *ini_path = mk_util_get_exe_dir("c_api.ini");
     char *ssl_path = mk_util_get_exe_dir("ssl.p12");
@@ -402,6 +394,7 @@ int main(int argc, char *argv[]) {
             .ini = ini_path,
             .ini_is_path = 1,
             .log_level = 0,
+            .log_mask = LOG_CONSOLE,
             .log_file_path = NULL,
             .log_file_days = 0,
             .ssl = ssl_path,
@@ -419,6 +412,7 @@ int main(int argc, char *argv[]) {
     mk_rtmp_server_start(1935, 0);
     mk_shell_server_start(9000);
     mk_rtp_server_start(10000);
+    mk_rtc_server_start(8000);
 
     mk_events events = {
             .on_mk_media_changed = on_mk_media_changed,
@@ -436,15 +430,11 @@ int main(int argc, char *argv[]) {
             .on_mk_flow_report = on_mk_flow_report
     };
     mk_events_listen(&events);
+    log_info("media server %s", "stared!");
 
-    signal(SIGINT, s_on_exit );// 设置退出信号
-    while (flag) {
-#ifdef _WIN32
-        Sleep(1000);
-#else
-        sleep(1);
-#endif
-    }
+    log_info("enter any key to exit");
+    getchar();
+
     mk_stop_all_server();
     return 0;
 }

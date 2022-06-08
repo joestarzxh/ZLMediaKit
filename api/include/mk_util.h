@@ -1,7 +1,7 @@
 ﻿/*
  * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
  * Use of this source code is governed by MIT license that can be found in the
  * LICENSE file in the root of the source tree. All contributing project authors
@@ -65,12 +65,12 @@ API_EXPORT char* API_CALL mk_util_hex_dump(const void *buf, int len);
 API_EXPORT void API_CALL mk_log_printf(int level, const char *file, const char *function, int line, const char *fmt, ...);
 
 // 以下宏可以替换printf使用
-#define log_trace(fmt,...) mk_log_printf(0,__FILE__,__FUNCTION__,__LINE__,fmt,##__VA_ARGS__)
-#define log_debug(fmt,...) mk_log_printf(1,__FILE__,__FUNCTION__,__LINE__,fmt,##__VA_ARGS__)
-#define log_info(fmt,...) mk_log_printf(2,__FILE__,__FUNCTION__,__LINE__,fmt,##__VA_ARGS__)
-#define log_warn(fmt,...) mk_log_printf(3,__FILE__,__FUNCTION__,__LINE__,fmt,##__VA_ARGS__)
-#define log_error(fmt,...) mk_log_printf(4,__FILE__,__FUNCTION__,__LINE__,fmt,##__VA_ARGS__)
-#define log_printf(lev,fmt,...) mk_log_printf(lev,__FILE__,__FUNCTION__,__LINE__,fmt,##__VA_ARGS__)
+#define log_printf(lev, ...) mk_log_printf(lev, __FILE__, __FUNCTION__, __LINE__, ##__VA_ARGS__)
+#define log_trace(...) log_printf(0, ##__VA_ARGS__)
+#define log_debug(...)  log_printf(1, ##__VA_ARGS__)
+#define log_info(...)   log_printf(2, ##__VA_ARGS__)
+#define log_warn(...)   log_printf(3, ##__VA_ARGS__)
+#define log_error(...) log_printf(4, ##__VA_ARGS__)
 
 #ifdef __cplusplus
 }
