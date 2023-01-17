@@ -70,7 +70,7 @@ private:
     bool _cache_able;
 };
 
-static mk_frame mk_frame_create_complex(int codec_id, uint32_t dts, uint32_t pts, uint32_t frame_flags, size_t prefix_size,
+static mk_frame mk_frame_create_complex(int codec_id, uint64_t dts, uint64_t pts, uint32_t frame_flags, size_t prefix_size,
                                        char *data, size_t size, on_mk_frame_data_release cb, void *user_data) {
     switch (codec_id) {
         case CodecH264:
@@ -85,7 +85,7 @@ static mk_frame mk_frame_create_complex(int codec_id, uint32_t dts, uint32_t pts
     }
 }
 
-API_EXPORT mk_frame API_CALL mk_frame_create(int codec_id, uint32_t dts, uint32_t pts, const char *data, size_t size,
+API_EXPORT mk_frame API_CALL mk_frame_create(int codec_id, uint64_t dts, uint64_t pts, const char *data, size_t size,
                                             on_mk_frame_data_release cb, void *user_data) {
 
     switch (codec_id) {
@@ -146,12 +146,12 @@ API_EXPORT size_t API_CALL mk_frame_get_data_prefix_size(mk_frame frame) {
     return (*((Frame::Ptr *) frame))->prefixSize();
 }
 
-API_EXPORT uint32_t API_CALL mk_frame_get_dts(mk_frame frame) {
+API_EXPORT uint64_t API_CALL mk_frame_get_dts(mk_frame frame) {
     assert(frame);
     return (*((Frame::Ptr *) frame))->dts();
 }
 
-API_EXPORT uint32_t API_CALL mk_frame_get_pts(mk_frame frame) {
+API_EXPORT uint64_t API_CALL mk_frame_get_pts(mk_frame frame) {
     assert(frame);
     return (*((Frame::Ptr *) frame))->pts();
 }
@@ -161,16 +161,16 @@ API_EXPORT uint32_t API_CALL mk_frame_get_flags(mk_frame frame) {
     auto &ref = *((Frame::Ptr *) frame);
     uint32_t ret = 0;
     if (ref->keyFrame()) {
-        ret &= MK_FRAME_FLAG_IS_KEY;
+        ret |= MK_FRAME_FLAG_IS_KEY;
     }
     if (ref->configFrame()) {
-        ret &= MK_FRAME_FLAG_IS_CONFIG;
+        ret |= MK_FRAME_FLAG_IS_CONFIG;
     }
     if (ref->dropAble()) {
-        ret &= MK_FRAME_FLAG_DROP_ABLE;
+        ret |= MK_FRAME_FLAG_DROP_ABLE;
     }
     if (!ref->decodeAble()) {
-        ret &= MK_FRAME_FLAG_NOT_DECODE_ABLE;
+        ret |= MK_FRAME_FLAG_NOT_DECODE_ABLE;
     }
     return ret;
 }

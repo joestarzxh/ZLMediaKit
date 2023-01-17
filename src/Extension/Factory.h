@@ -28,10 +28,24 @@ public:
     static Track::Ptr getTrackBySdp(const SdpTrack::Ptr &track);
 
     /**
+     * 根据c api 抽象的Track生成具体Track对象
+     */
+    static Track::Ptr getTrackByAbstractTrack(const Track::Ptr& track);
+
+    /**
      * 根据sdp生成rtp编码器
      * @param sdp sdp对象
      */
     static RtpCodec::Ptr getRtpEncoderBySdp(const Sdp::Ptr &sdp);
+
+    /**
+     * 根据codec id生成rtp编码器
+     * @param codec_id 编码id
+     * @param sample_rate 采样率，视频固定为90000
+     * @param pt rtp payload type
+     * @param ssrc rtp ssrc
+     */
+    static RtpCodec::Ptr getRtpEncoderByCodecId(CodecId codec_id, uint32_t sample_rate, uint8_t pt, uint32_t ssrc);
 
     /**
      * 根据Track生成Rtp解包器

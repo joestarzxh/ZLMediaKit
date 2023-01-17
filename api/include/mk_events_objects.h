@@ -128,6 +128,7 @@ API_EXPORT void API_CALL mk_media_source_find(const char *schema,
                                               const char *vhost,
                                               const char *app,
                                               const char *stream,
+                                              int from_mp4,
                                               void *user_data,
                                               on_mk_media_source_find_cb cb);
 //MediaSource::for_each_media()
@@ -176,14 +177,6 @@ API_EXPORT void API_CALL mk_http_response_invoker_do(const mk_http_response_invo
                                                      int response_code,
                                                      const char **response_header,
                                                      const mk_http_body response_body);
-/**
- * HttpSession::HttpResponseInvoker(const string &codeOut, const StrCaseMap &headerOut, const HttpBody::Ptr &body);
-   Parser();
-   SockInfo();
- */
-API_EXPORT void API_CALL mk_webrtc_http_response_invoker_do( const mk_http_response_invoker invoker,
-                                                            const mk_parser parser,
-                                                            const mk_sock_info sender);
 
 /**
  * HttpSession::HttpResponseInvoker(const string &codeOut, const StrCaseMap &headerOut, const string &body);

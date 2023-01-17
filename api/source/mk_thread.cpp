@@ -18,7 +18,7 @@ using namespace toolkit;
 
 API_EXPORT mk_thread API_CALL mk_thread_from_tcp_session(mk_tcp_session ctx){
     assert(ctx);
-    TcpSessionForC *obj = (TcpSessionForC *)ctx;
+    SessionForC *obj = (SessionForC *)ctx;
     return obj->getPoller().get();
 }
 
@@ -63,7 +63,7 @@ API_EXPORT void API_CALL mk_sync_do(mk_thread ctx,on_mk_async cb, void *user_dat
 
 class TimerForC : public std::enable_shared_from_this<TimerForC>{
 public:
-    typedef std::shared_ptr<TimerForC> Ptr;
+    using Ptr = std::shared_ptr<TimerForC>;
 
     TimerForC(on_mk_timer cb, void *user_data){
         _cb = cb;

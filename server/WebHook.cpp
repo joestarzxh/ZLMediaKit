@@ -15,7 +15,7 @@
 #include "Common/config.h"
 #include "Common/MediaSource.h"
 #include "Http/HttpRequester.h"
-#include "Network/TcpSession.h"
+#include "Network/Session.h"
 #include "Rtsp/RtspSession.h"
 #include "Http/HttpSession.h"
 #include "WebHook.h"
@@ -45,8 +45,12 @@ const string kOnStreamNoneReader = HOOK_FIELD"on_stream_none_reader";
 const string kOnHttpAccess = HOOK_FIELD"on_http_access";
 const string kOnServerStarted = HOOK_FIELD"on_server_started";
 const string kOnServerKeepalive = HOOK_FIELD"on_server_keepalive";
+const string kOnSendRtpStopped = HOOK_FIELD"on_send_rtp_stopped";
+const string kOnRtpServerTimeout = HOOK_FIELD"on_rtp_server_timeout";
 const string kAdminParams = HOOK_FIELD"admin_params";
 const string kAliveInterval = HOOK_FIELD"alive_interval";
+const string kRetry = HOOK_FIELD"retry";
+const string kRetryDelay = HOOK_FIELD"retry_delay";
 
 onceToken token([](){
     mINI::Instance()[kEnable] = false;
@@ -66,8 +70,12 @@ onceToken token([](){
     mINI::Instance()[kOnHttpAccess] = "";
     mINI::Instance()[kOnServerStarted] = "";
     mINI::Instance()[kOnServerKeepalive] = "";
+    mINI::Instance()[kOnSendRtpStopped] = "";
+    mINI::Instance()[kOnRtpServerTimeout] = "";
     mINI::Instance()[kAdminParams] = "secret=035c73f7-bb6b-4889-a715-d9eb2d1925cc";
     mINI::Instance()[kAliveInterval] = 30.0;
+    mINI::Instance()[kRetry] = 1;
+    mINI::Instance()[kRetryDelay] = 3.0;
 },nullptr);
 }//namespace Hook
 
@@ -147,9 +155,10 @@ string getVhost(const HttpArgs &value) {
     return val != value.end() ? val->second : "";
 }
 
-void do_http_hook(const string &url,const ArgsType &body,const function<void(const Value &,const string &)> &func){
+void do_http_hook(const string &url, const ArgsType &body, const function<void(const Value &, const string &)> &func, uint32_t retry) {
     GET_CONFIG(string, mediaServerId, General::kMediaServerId);
     GET_CONFIG(float, hook_timeoutSec, Hook::kTimeoutSec);
+    GET_CONFIG(float, retry_delay, Hook::kRetryDelay);
 
     const_cast<ArgsType &>(body)["mediaServerId"] = mediaServerId;
     HttpRequester::Ptr requester(new HttpRequester);
@@ -161,23 +170,38 @@ void do_http_hook(const string &url,const ArgsType &body,const function<void(con
     if (!vhost.empty()) {
         requester->addHeader("X-VHOST", vhost);
     }
-    std::shared_ptr<Ticker> pTicker(new Ticker);
-    requester->startRequester(url, [url, func, bodyStr, requester, pTicker](const SockException &ex,
-                                                                            const Parser &res) mutable{
-        onceToken token(nullptr, [&]() mutable{
-            requester.reset();
-        });
-        parse_http_response(ex, res, [&](const Value &obj, const string &err) {
+    Ticker ticker;
+    requester->startRequester(url, [url, func, bodyStr, body, requester, ticker, retry](const SockException &ex, const Parser &res) mutable {
+            onceToken token(nullptr, [&]() mutable { requester.reset(); });
+            parse_http_response(ex, res, [&](const Value &obj, const string &err) {
+            if (!err.empty()) {
+                // hook失败
+                WarnL << "hook " << url << " " << ticker.elapsedTime() << "ms,failed" << err << ":" << bodyStr;
+
+                if (retry-- > 0) {
+                    requester->getPoller()->doDelayTask(MAX(retry_delay, 0.0) * 1000, [url, body, func, retry] {
+                        do_http_hook(url, body, func, retry);
+                        return 0;
+                    });
+                    //重试不需要触发回调
+                    return;
+                }
+
+            } else if (ticker.elapsedTime() > 500) {
+                //hook成功，但是hook响应超过500ms，打印警告日志
+                DebugL << "hook " << url << " " << ticker.elapsedTime() << "ms,success:" << bodyStr;
+            }
+
             if (func) {
                 func(obj, err);
             }
-            if (!err.empty()) {
-                WarnL << "hook " << url << " " << pTicker->elapsedTime() << "ms,failed" << err << ":" << bodyStr;
-            } else if (pTicker->elapsedTime() > 500) {
-                DebugL << "hook " << url << " " << pTicker->elapsedTime() << "ms,success:" << bodyStr;
-            }
         });
     }, hook_timeoutSec);
+}
+
+void do_http_hook(const string &url, const ArgsType &body, const function<void(const Value &, const string &)> &func) {
+    GET_CONFIG(uint32_t, hook_retry, Hook::kRetry);
+    do_http_hook(url, body, func, hook_retry);
 }
 
 static ArgsType make_json(const MediaInfo &args){
@@ -268,11 +292,28 @@ static void pullStreamFromOrigin(const vector<string>& urls, size_t index, size_
     });
 }
 
+static void *web_hook_tag = nullptr;
+
+static mINI jsonToMini(const Value &obj) {
+    mINI ret;
+    if (obj.isObject()) {
+        for (auto it = obj.begin(); it != obj.end(); ++it) {
+            try {
+                auto str = (*it).asString();
+                ret[it.name()] = std::move(str);
+            } catch (std::exception &) {
+                WarnL << "Json is not convertible to string, key: " << it.name() << ", value: " << (*it);
+            }
+        }
+    }
+    return ret;
+}
+
 void installWebHook(){
     GET_CONFIG(bool,hook_enable,Hook::kEnable);
     GET_CONFIG(string,hook_adminparams,Hook::kAdminParams);
 
-    NoticeCenter::Instance().addListener(nullptr, Broadcast::kBroadcastMediaPublish, [](BroadcastMediaPublishArgs) {
+    NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastMediaPublish, [](BroadcastMediaPublishArgs) {
         GET_CONFIG(string,hook_publish,Hook::kOnPublish);
         if (!hook_enable || args._param_strs == hook_adminparams || hook_publish.empty() || sender.get_peer_ip() == "127.0.0.1") {
             invoker("", ProtocolOption());
@@ -287,54 +328,17 @@ void installWebHook(){
         body["originTypeStr"] = getOriginTypeString(type);
         //执行hook
         do_http_hook(hook_publish, body, [invoker](const Value &obj, const string &err) mutable {
-            ProtocolOption option;
             if (err.empty()) {
                 //推流鉴权成功
-                if (obj.isMember("enable_hls")) {
-                    option.enable_hls = obj["enable_hls"].asBool();
-                }
-                if (obj.isMember("enable_mp4")) {
-                    option.enable_mp4 = obj["enable_mp4"].asBool();
-                }
-                if (obj.isMember("enable_audio")) {
-                    option.enable_audio = obj["enable_audio"].asBool();
-                }
-                if (obj.isMember("add_mute_audio")) {
-                    option.add_mute_audio = obj["add_mute_audio"].asBool();
-                }
-                if (obj.isMember("mp4_save_path")) {
-                    option.mp4_save_path = obj["mp4_save_path"].asString();
-                }
-                if (obj.isMember("mp4_max_second")) {
-                    option.mp4_max_second = obj["mp4_max_second"].asUInt();
-                }
-                if (obj.isMember("hls_save_path")) {
-                    option.hls_save_path = obj["hls_save_path"].asString();
-                }
-                if (obj.isMember("enable_rtsp")) {
-                    option.enable_rtsp = obj["enable_rtsp"].asBool();
-                }
-                if (obj.isMember("enable_rtmp")) {
-                    option.enable_rtmp = obj["enable_rtmp"].asBool();
-                }
-                if (obj.isMember("enable_ts")) {
-                    option.enable_ts = obj["enable_ts"].asBool();
-                }
-                if (obj.isMember("enable_fmp4")) {
-                    option.enable_fmp4 = obj["enable_fmp4"].asBool();
-                }
-                if (obj.isMember("continue_push_ms")) {
-                    option.continue_push_ms = obj["continue_push_ms"].asUInt();
-                }
-                invoker(err, option);
+                invoker(err, ProtocolOption(jsonToMini(obj)));
             } else {
                 //推流鉴权失败
-                invoker(err, option);
+                invoker(err, ProtocolOption());
             }
         });
     });
 
-    NoticeCenter::Instance().addListener(nullptr,Broadcast::kBroadcastMediaPlayed,[](BroadcastMediaPlayedArgs){
+    NoticeCenter::Instance().addListener(&web_hook_tag,Broadcast::kBroadcastMediaPlayed,[](BroadcastMediaPlayedArgs){
         GET_CONFIG(string,hook_play,Hook::kOnPlay);
         if(!hook_enable || args._param_strs == hook_adminparams || hook_play.empty() || sender.get_peer_ip() == "127.0.0.1"){
             invoker("");
@@ -350,7 +354,7 @@ void installWebHook(){
         });
     });
 
-    NoticeCenter::Instance().addListener(nullptr,Broadcast::kBroadcastFlowReport,[](BroadcastFlowReportArgs){
+    NoticeCenter::Instance().addListener(&web_hook_tag,Broadcast::kBroadcastFlowReport,[](BroadcastFlowReportArgs){
         GET_CONFIG(string,hook_flowreport,Hook::kOnFlowReport);
         if(!hook_enable || args._param_strs == hook_adminparams || hook_flowreport.empty() || sender.get_peer_ip() == "127.0.0.1"){
             return;
@@ -370,7 +374,7 @@ void installWebHook(){
     static const string unAuthedRealm = "unAuthedRealm";
 
     //监听kBroadcastOnGetRtspRealm事件决定rtsp链接是否需要鉴权(传统的rtsp鉴权方案)才能访问
-    NoticeCenter::Instance().addListener(nullptr,Broadcast::kBroadcastOnGetRtspRealm,[](BroadcastOnGetRtspRealmArgs){
+    NoticeCenter::Instance().addListener(&web_hook_tag,Broadcast::kBroadcastOnGetRtspRealm,[](BroadcastOnGetRtspRealmArgs){
         GET_CONFIG(string,hook_rtsp_realm,Hook::kOnRtspRealm);
         if(!hook_enable || args._param_strs == hook_adminparams || hook_rtsp_realm.empty() || sender.get_peer_ip() == "127.0.0.1"){
             //无需认证
@@ -393,7 +397,7 @@ void installWebHook(){
     });
 
     //监听kBroadcastOnRtspAuth事件返回正确的rtsp鉴权用户密码
-    NoticeCenter::Instance().addListener(nullptr,Broadcast::kBroadcastOnRtspAuth,[](BroadcastOnRtspAuthArgs){
+    NoticeCenter::Instance().addListener(&web_hook_tag,Broadcast::kBroadcastOnRtspAuth,[](BroadcastOnRtspAuthArgs){
         GET_CONFIG(string,hook_rtsp_auth,Hook::kOnRtspAuth);
         if(unAuthedRealm == realm || !hook_enable || hook_rtsp_auth.empty()){
             //认证失败
@@ -420,7 +424,7 @@ void installWebHook(){
 
 
     //监听rtsp、rtmp源注册或注销事件
-    NoticeCenter::Instance().addListener(nullptr,Broadcast::kBroadcastMediaChanged,[](BroadcastMediaChangedArgs){
+    NoticeCenter::Instance().addListener(&web_hook_tag,Broadcast::kBroadcastMediaChanged,[](BroadcastMediaChangedArgs){
         GET_CONFIG(string,hook_stream_chaned,Hook::kOnStreamChanged);
         if(!hook_enable || hook_stream_chaned.empty()){
             return;
@@ -452,7 +456,7 @@ void installWebHook(){
     });
 
     //监听播放失败(未找到特定的流)事件
-    NoticeCenter::Instance().addListener(nullptr, Broadcast::kBroadcastNotFoundStream, [](BroadcastNotFoundStreamArgs) {
+    NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastNotFoundStream, [](BroadcastNotFoundStreamArgs) {
         if (!origin_urls.empty()) {
             //设置了源站，那么尝试溯源
             static atomic<uint8_t> s_index { 0 };
@@ -475,8 +479,17 @@ void installWebHook(){
         body["ip"] = sender.get_peer_ip();
         body["port"] = sender.get_peer_port();
         body["id"] = sender.getIdentifier();
+
+        // Hook回复立即关闭流
+        auto res_cb = [closePlayer](const Value &res, const string &err) {
+            bool flag = res["close"].asBool();
+            if (flag) {
+                closePlayer();
+            }
+        };
+
         //执行hook
-        do_http_hook(hook_stream_not_found, body, nullptr);
+        do_http_hook(hook_stream_not_found, body, res_cb);
     });
 
     static auto getRecordInfo = [](const RecordInfo &info) {
@@ -496,7 +509,7 @@ void installWebHook(){
 
 #ifdef ENABLE_MP4
     //录制mp4文件成功后广播
-    NoticeCenter::Instance().addListener(nullptr,Broadcast::kBroadcastRecordMP4,[](BroadcastRecordMP4Args){
+    NoticeCenter::Instance().addListener(&web_hook_tag,Broadcast::kBroadcastRecordMP4,[](BroadcastRecordMP4Args){
         GET_CONFIG(string,hook_record_mp4,Hook::kOnRecordMp4);
         if (!hook_enable || hook_record_mp4.empty()) {
             return;
@@ -506,7 +519,7 @@ void installWebHook(){
     });
 #endif //ENABLE_MP4
 
-    NoticeCenter::Instance().addListener(nullptr, Broadcast::kBroadcastRecordTs, [](BroadcastRecordTsArgs) {
+    NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastRecordTs, [](BroadcastRecordTsArgs) {
         GET_CONFIG(string,hook_record_ts,Hook::kOnRecordTs);
         if (!hook_enable || hook_record_ts.empty()) {
             return;
@@ -515,7 +528,7 @@ void installWebHook(){
         do_http_hook(hook_record_ts, getRecordInfo(info), nullptr);
     });
 
-    NoticeCenter::Instance().addListener(nullptr,Broadcast::kBroadcastShellLogin,[](BroadcastShellLoginArgs){
+    NoticeCenter::Instance().addListener(&web_hook_tag,Broadcast::kBroadcastShellLogin,[](BroadcastShellLoginArgs){
         GET_CONFIG(string,hook_shell_login,Hook::kOnShellLogin);
         if(!hook_enable || hook_shell_login.empty() || sender.get_peer_ip() == "127.0.0.1"){
             invoker("");
@@ -534,7 +547,7 @@ void installWebHook(){
         });
     });
 
-    NoticeCenter::Instance().addListener(nullptr,Broadcast::kBroadcastStreamNoneReader,[](BroadcastStreamNoneReaderArgs) {
+    NoticeCenter::Instance().addListener(&web_hook_tag,Broadcast::kBroadcastStreamNoneReader,[](BroadcastStreamNoneReaderArgs) {
         if (!origin_urls.empty()) {
             //边沿站无人观看时立即停止溯源
             sender.close(false);
@@ -564,6 +577,26 @@ void installWebHook(){
         });
     });
 
+    NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::kBroadcastSendRtpStopped, [](BroadcastSendRtpStopped) {
+        GET_CONFIG(string, hook_send_rtp_stopped, Hook::kOnSendRtpStopped);
+        if (!hook_enable || hook_send_rtp_stopped.empty()) {
+            return;
+        }
+
+        ArgsType body;
+        body[VHOST_KEY] = sender.getVhost();
+        body["app"] = sender.getApp();
+        body["stream"] = sender.getStreamId();
+        body["ssrc"] = ssrc;
+        body["originType"] = (int)sender.getOriginType(MediaSource::NullMediaSource());
+        body["originTypeStr"] = getOriginTypeString(sender.getOriginType(MediaSource::NullMediaSource()));
+        body["originUrl"] = sender.getOriginUrl(MediaSource::NullMediaSource());
+        body["msg"] = ex.what();
+        body["err"] = ex.getErrCode();
+        //执行hook
+        do_http_hook(hook_send_rtp_stopped, body, nullptr);
+    });
+
     /**
      * kBroadcastHttpAccess事件触发机制
      * 1、根据http请求头查找cookie，找到进入步骤3
@@ -579,7 +612,7 @@ void installWebHook(){
     //如果用户客户端不支持cookie，那么ZLMediaKit会根据url参数查找cookie并追踪用户，
     //如果没有url参数，客户端又不支持cookie，那么会根据ip和端口追踪用户
     //追踪用户的目的是为了缓存上次鉴权结果，减少鉴权次数，提高性能
-    NoticeCenter::Instance().addListener(nullptr,Broadcast::kBroadcastHttpAccess,[](BroadcastHttpAccessArgs){
+    NoticeCenter::Instance().addListener(&web_hook_tag,Broadcast::kBroadcastHttpAccess,[](BroadcastHttpAccessArgs){
         GET_CONFIG(string,hook_http_access,Hook::kOnHttpAccess);
         if(sender.get_peer_ip() == "127.0.0.1" || parser.Params() == hook_adminparams){
             //如果是本机或超级管理员访问，那么不做访问鉴权；权限有效期1个小时
@@ -617,6 +650,21 @@ void installWebHook(){
         });
     });
 
+    NoticeCenter::Instance().addListener(&web_hook_tag, Broadcast::KBroadcastRtpServerTimeout, [](BroadcastRtpServerTimeout) {
+        GET_CONFIG(string, rtp_server_timeout, Hook::kOnRtpServerTimeout);
+        if (!hook_enable || rtp_server_timeout.empty()) {
+            return;
+        }
+
+        ArgsType body;
+        body["local_port"] = local_port;
+        body["stream_id"] = stream_id;
+        body["tcp_mode"] = tcp_mode;
+        body["re_use_port"] = re_use_port;
+        body["ssrc"] = ssrc;
+        do_http_hook(rtp_server_timeout, body);
+    });
+
     //汇报服务器重新启动
     reportServerStarted();
 
@@ -626,4 +674,5 @@ void installWebHook(){
 
 void unInstallWebHook(){
     g_keepalive_timer.reset();
+    NoticeCenter::Instance().delListener(&web_hook_tag);
 }

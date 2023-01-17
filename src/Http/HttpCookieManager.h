@@ -91,8 +91,8 @@ public:
      * 获取附加数据
      */
     template <class T>
-    const T& getAttach() const {
-        return *static_cast<const T *>(_attach.get());
+    T& getAttach() {
+        return *static_cast<T *>(_attach.get());
     }
 
 private:
@@ -111,10 +111,10 @@ private:
 /**
  * cookie随机字符串生成器
  */
-class RandStrGeneator {
+class RandStrGenerator {
 public:
-    RandStrGeneator() = default;
-    ~RandStrGeneator() = default;
+    RandStrGenerator() = default;
+    ~RandStrGenerator() = default;
 
     /**
      * 获取不碰撞的随机字符串
@@ -244,7 +244,7 @@ private:
         _map_uid_to_cookie;
     std::recursive_mutex _mtx_cookie;
     toolkit::Timer::Ptr _timer;
-    RandStrGeneator _geneator;
+    RandStrGenerator _generator;
 };
 
 } // namespace mediakit

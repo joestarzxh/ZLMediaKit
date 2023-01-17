@@ -56,10 +56,9 @@ PlayerBase::Ptr PlayerBase::createPlayer(const EventPoller::Ptr &poller, const s
         } else if (end_with(url, ".ts") || end_with(url_in, ".ts")) {
             return PlayerBase::Ptr(new TsPlayerImp(poller), releasePlayer);
         }
-        return PlayerBase::Ptr(new TsPlayerImp(poller), releasePlayer);
     }
 
-    return PlayerBase::Ptr(new RtspPlayerImp(poller), releasePlayer);
+    throw std::invalid_argument("not supported play schema:" + url_in);
 }
 
 PlayerBase::PlayerBase() {
@@ -67,89 +66,6 @@ PlayerBase::PlayerBase() {
     this->mINI::operator[](Client::kMediaTimeoutMS) = 5000;
     this->mINI::operator[](Client::kBeatIntervalMS) = 5000;
     this->mINI::operator[](Client::kWaitTrackReady) = true;
-}
-
-///////////////////////////DemuxerSink//////////////////////////////
-
-void MediaSinkDelegate::setTrackListener(TrackListener *listener) {
-    _listener = listener;
-}
-
-bool MediaSinkDelegate::onTrackReady(const Track::Ptr &track) {
-    if (_listener) {
-        _listener->addTrack(track);
-    }
-    return true;
-}
-
-void MediaSinkDelegate::onAllTrackReady() {
-    if (_listener) {
-        _listener->addTrackCompleted();
-    }
-}
-
-void MediaSinkDelegate::resetTracks() {
-    MediaSink::resetTracks();
-    if (_listener) {
-        _listener->resetTracks();
-    }
-}
-
-///////////////////////////Demuxer//////////////////////////////
-
-void Demuxer::setTrackListener(TrackListener *listener, bool wait_track_ready) {
-    if (wait_track_ready) {
-        auto sink = std::make_shared<MediaSinkDelegate>();
-        sink->setTrackListener(listener);
-        _sink = std::move(sink);
-    }
-    _listener = listener;
-}
-
-bool Demuxer::addTrack(const Track::Ptr &track) {
-    if (!_sink) {
-        _origin_track.emplace_back(track);
-        return _listener ? _listener->addTrack(track) : false;
-    }
-
-    if (_sink->addTrack(track)) {
-        track->addDelegate(std::make_shared<FrameWriterInterfaceHelper>([this](const Frame::Ptr &frame) {
-            return _sink->inputFrame(frame);
-        }));
-        return true;
-    }
-    return false;
-}
-
-void Demuxer::addTrackCompleted() {
-    if (_sink) {
-        _sink->addTrackCompleted();
-    } else if (_listener) {
-        _listener->addTrackCompleted();
-    }
-}
-
-void Demuxer::resetTracks() {
-    if (_sink) {
-        _sink->resetTracks();
-    } else if (_listener) {
-        _listener->resetTracks();
-    }
-}
-
-vector<Track::Ptr> Demuxer::getTracks(bool ready) const {
-    if (_sink) {
-        return _sink->getTracks(ready);
-    }
-
-    vector<Track::Ptr> ret;
-    for (auto &track : _origin_track) {
-        if (ready && !track->ready()) {
-            continue;
-        }
-        ret.emplace_back(track);
-    }
-    return ret;
 }
 
 } /* namespace mediakit */

@@ -12,8 +12,7 @@
 #define SRC_HTTP_HTTPSESSION_H_
 
 #include <functional>
-#include "Network/TcpSession.h"
-#include "Rtmp/RtmpMediaSource.h"
+#include "Network/Session.h"
 #include "Rtmp/FlvMuxer.h"
 #include "HttpRequestSplitter.h"
 #include "WebSocketSplitter.h"
@@ -24,7 +23,7 @@
 
 namespace mediakit {
 
-class HttpSession: public toolkit::TcpSession,
+class HttpSession: public toolkit::Session,
                    public FlvMuxer,
                    public HttpRequestSplitter,
                    public WebSocketSplitter {
@@ -97,6 +96,9 @@ protected:
      */
     void onWebSocketDecodeComplete(const WebSocketHeader &header_in) override;
 
+    //重载获取客户端ip
+    std::string get_peer_ip() override;
+
 private:
     void Handle_Req_GET(ssize_t &content_len);
     void Handle_Req_GET_l(ssize_t &content_len, bool sendBody);
@@ -136,7 +138,7 @@ private:
     std::function<bool (const char *data,size_t len) > _contentCallBack;
 };
 
-using HttpsSession = toolkit::TcpSessionWithSSL<HttpSession>;
+using HttpsSession = toolkit::SessionWithSSL<HttpSession>;
 
 } /* namespace mediakit */
 

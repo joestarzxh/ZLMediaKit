@@ -20,31 +20,33 @@ namespace mediakit {
 
 class Decoder {
 public:
-    typedef std::shared_ptr<Decoder> Ptr;
-    typedef std::function<void(int stream, int codecid, int flags, int64_t pts, int64_t dts, const void *data, size_t bytes)> onDecode;
-    typedef std::function<void(int stream, int codecid, const void *extra, size_t bytes, int finish)> onStream;
+    using Ptr = std::shared_ptr<Decoder>;
+    using onDecode = std::function<void(int stream, int codecid, int flags, int64_t pts, int64_t dts, const void *data, size_t bytes)>;
+    using onStream = std::function<void(int stream, int codecid, const void *extra, size_t bytes, int finish)>;
 
     virtual ssize_t input(const uint8_t *data, size_t bytes) = 0;
-    virtual void setOnDecode(onDecode cb) = 0;
-    virtual void setOnStream(onStream cb) = 0;
+    void setOnDecode(onDecode cb);
+    void setOnStream(onStream cb);
 
 protected:
     Decoder() = default;
     virtual ~Decoder() = default;
+
+protected:
+    onDecode _on_decode;
+    onStream _on_stream;
 };
 
 class DecoderImp{
 public:
-    typedef enum {
-        decoder_ts = 0,
-        decoder_ps
-    }Type;
+    typedef enum { decoder_ts = 0, decoder_ps } Type;
 
-    typedef std::shared_ptr<DecoderImp> Ptr;
+    using Ptr = std::shared_ptr<DecoderImp>;
     ~DecoderImp() = default;
 
     static Ptr createDecoder(Type type, MediaSinkInterface *sink);
     ssize_t input(const uint8_t *data, size_t bytes);
+    void flush();
 
 protected:
     void onTrack(const Track::Ptr &track);
@@ -59,7 +61,6 @@ private:
     Decoder::Ptr _decoder;
     MediaSinkInterface *_sink;
     FrameMerger _merger{FrameMerger::none};
-    toolkit::Ticker _last_unsported_print;
     Track::Ptr _tracks[TrackMax];
 };
 

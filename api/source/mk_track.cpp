@@ -10,12 +10,13 @@
 
 #include "mk_track.h"
 #include "Extension/Track.h"
+#include "Extension/Factory.h"
 
 using namespace std;
 using namespace toolkit;
 using namespace mediakit;
 
-class VideoTrackForC : public VideoTrack {
+class VideoTrackForC : public VideoTrack, public std::enable_shared_from_this<VideoTrackForC> {
 public:
     VideoTrackForC(int codec_id, codec_args *args) {
         _codec_id = (CodecId) codec_id;
@@ -49,7 +50,8 @@ public:
     }
 
     Track::Ptr clone() override {
-        return std::make_shared<std::remove_reference<decltype(*this)>::type>(*this);
+        auto track_in = std::shared_ptr<Track>(shared_from_this());
+        return Factory::getTrackByAbstractTrack(track_in);
     }
 
     Sdp::Ptr getSdp() override {
@@ -61,15 +63,16 @@ private:
     codec_args _args;
 };
 
-class AudioTrackForC : public AudioTrackImp {
+class AudioTrackForC : public AudioTrackImp, public std::enable_shared_from_this<AudioTrackForC> {
 public:
     ~AudioTrackForC() override = default;
 
     AudioTrackForC(int codec_id, codec_args *args) :
-            AudioTrackImp((CodecId) codec_id, args->audio.sample_rate, args->audio.channels, 16) {}
+        AudioTrackImp((CodecId) codec_id, args->audio.sample_rate, args->audio.channels, 16) {}
 
     Track::Ptr clone() override {
-        return std::make_shared<std::remove_reference<decltype(*this)>::type>(*this);
+        auto track_in = std::shared_ptr<Track>(shared_from_this());
+        return Factory::getTrackByAbstractTrack(track_in);
     }
 
     Sdp::Ptr getSdp() override {
@@ -112,12 +115,10 @@ API_EXPORT int API_CALL mk_track_bit_rate(mk_track track) {
 
 API_EXPORT void *API_CALL mk_track_add_delegate(mk_track track, on_mk_frame_out cb, void *user_data) {
     assert(track && cb);
-    auto delegate = std::make_shared<FrameWriterInterfaceHelper>([cb, user_data](const Frame::Ptr &frame) {
+    return (*((Track::Ptr *) track))->addDelegate([cb, user_data](const Frame::Ptr &frame) {
         cb(user_data, (mk_frame) &frame);
         return true;
     });
-    (*((Track::Ptr *) track))->addDelegate(delegate);
-    return delegate.get();
 }
 
 API_EXPORT void API_CALL mk_track_del_delegate(mk_track track, void *tag) {

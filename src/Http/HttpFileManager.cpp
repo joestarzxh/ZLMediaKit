@@ -19,6 +19,8 @@
 #include "HttpSession.h"
 #include "Record/HlsMediaSource.h"
 #include "Common/Parser.h"
+#include "Common/config.h"
+#include "strCoding.h"
 
 using namespace std;
 using namespace toolkit;
@@ -32,8 +34,9 @@ static int kHlsCookieSecond = 60;
 static const string kCookieName = "ZL_COOKIE";
 static const string kHlsSuffix = "/hls.m3u8";
 
-class HttpCookieAttachment {
-public:
+struct HttpCookieAttachment {
+    //是否已经查找到过MediaSource
+    bool _find_src = false;
     //cookie生效作用域，本cookie只对该目录下的文件生效
     string _path;
     //上次鉴权失败信息,为空则上次鉴权成功
@@ -124,7 +127,7 @@ static bool makeFolderMenu(const string &httpPath, const string &strFullPath, st
         if (pDirent->d_name[0] == '.') {
             continue;
         }
-        file_map.emplace(pDirent->d_name, std::make_pair(pDirent->d_name, strPathPrefix + "/" + pDirent->d_name));
+        file_map.emplace(strCoding::UrlEncode(pDirent->d_name), std::make_pair(pDirent->d_name, strPathPrefix + "/" + pDirent->d_name));
     }
     //如果是root目录，添加虚拟目录
     if (httpPath == "/") {
@@ -179,7 +182,7 @@ static bool makeFolderMenu(const string &httpPath, const string &strFullPath, st
 }
 
 //拦截hls的播放请求
-static bool emitHlsPlayed(const Parser &parser, const MediaInfo &media_info, const HttpSession::HttpAccessPathInvoker &invoker,TcpSession &sender){
+static bool emitHlsPlayed(const Parser &parser, const MediaInfo &media_info, const HttpSession::HttpAccessPathInvoker &invoker,Session &sender){
     //访问的hls.m3u8结尾，我们转换成kBroadcastMediaPlayed事件
     Broadcast::AuthInvoker auth_invoker = [invoker](const string &err) {
         //cookie有效期为kHlsCookieSecond
@@ -195,7 +198,7 @@ static bool emitHlsPlayed(const Parser &parser, const MediaInfo &media_info, con
 
 class SockInfoImp : public SockInfo{
 public:
-    typedef std::shared_ptr<SockInfoImp> Ptr;
+    using Ptr = std::shared_ptr<SockInfoImp>;
     SockInfoImp() = default;
     ~SockInfoImp() override = default;
 
@@ -234,7 +237,7 @@ public:
  * 4、cookie中记录的url参数是否跟本次url参数一致，如果一致直接返回客户端错误码
  * 5、触发kBroadcastHttpAccess事件
  */
-static void canAccessPath(TcpSession &sender, const Parser &parser, const MediaInfo &media_info, bool is_dir,
+static void canAccessPath(Session &sender, const Parser &parser, const MediaInfo &media_info, bool is_dir,
                           const function<void(const string &err_msg, const HttpServerCookie::Ptr &cookie)> &callback) {
     //获取用户唯一id
     auto uid = parser.Params();
@@ -351,7 +354,7 @@ static string pathCat(const string &a, const string &b){
  * @param file_path 文件绝对路径
  * @param cb 回调对象
  */
-static void accessFile(TcpSession &sender, const Parser &parser, const MediaInfo &media_info, const string &file_path, const HttpFileManager::invoker &cb) {
+static void accessFile(Session &sender, const Parser &parser, const MediaInfo &media_info, const string &file_path, const HttpFileManager::invoker &cb) {
     bool is_hls = end_with(file_path, kHlsSuffix);
     if (!is_hls && !File::fileExist(file_path.data())) {
         //文件不存在且不是hls,那么直接返回404
@@ -364,7 +367,7 @@ static void accessFile(TcpSession &sender, const Parser &parser, const MediaInfo
         replace(const_cast<string &>(media_info._streamid), kHlsSuffix, "");
     }
 
-    weak_ptr<TcpSession> weakSession = sender.shared_from_this();
+    weak_ptr<Session> weakSession = sender.shared_from_this();
     //判断是否有权限访问该文件
     canAccessPath(sender, parser, media_info, false, [cb, file_path, parser, is_hls, media_info, weakSession](const string &err_msg, const HttpServerCookie::Ptr &cookie) {
         auto strongSession = weakSession.lock();
@@ -424,6 +427,11 @@ static void accessFile(TcpSession &sender, const Parser &parser, const MediaInfo
             response_file(cookie, cb, file_path, parser, src->getIndexFile());
             return;
         }
+        if (cookie->getAttach<HttpCookieAttachment>()._find_src) {
+            //查找过MediaSource，但是流已经注销了，不用再查找
+            response_file(cookie, cb, file_path, parser);
+            return;
+        }
 
         //hls流可能未注册，MediaSource::findAsync可以触发not_found事件，然后再按需推拉流
         MediaSource::findAsync(media_info, strongSession, [response_file, cookie, cb, file_path, parser](const MediaSource::Ptr &src) {
@@ -438,6 +446,8 @@ static void accessFile(TcpSession &sender, const Parser &parser, const MediaInfo
             attach._hls_data->setMediaSource(hls);
             //添加HlsMediaSource的观看人数(HLS是按需生成的，这样可以触发HLS文件的生成)
             attach._hls_data->addByteUsage(0);
+            //标记找到MediaSource
+            attach._find_src = true;
 
             // m3u8文件可能不存在, 等待m3u8索引文件按需生成
             hls->getIndexFile([response_file, file_path, cookie, cb, parser](const string &file) {
@@ -447,7 +457,7 @@ static void accessFile(TcpSession &sender, const Parser &parser, const MediaInfo
     });
 }
 
-static string getFilePath(const Parser &parser,const MediaInfo &media_info, TcpSession &sender){
+static string getFilePath(const Parser &parser,const MediaInfo &media_info, Session &sender){
     GET_CONFIG(bool, enableVhost, General::kEnableVhost);
     GET_CONFIG(string, rootPath, Http::kRootPath);
     GET_CONFIG_FUNC(StrCaseMap, virtualPathMap, Http::kVirtualPath, [](const string &str) {
@@ -465,6 +475,12 @@ static string getFilePath(const Parser &parser,const MediaInfo &media_info, TcpS
         path = rootPath;
         url = parser.Url();
     }
+    for (auto &ch : url) {
+        if (ch == '\\') {
+            //如果url中存在"\"，这种目录是Windows样式的；需要批量转换为标准的"/"; 防止访问目录权限外的文件
+            ch = '/';
+        }
+    }
     auto ret = File::absolutePath(enableVhost ? media_info._vhost + url : url, path);
     NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastHttpBeforeAccess, parser, ret, static_cast<SockInfo &>(sender));
     return ret;
@@ -476,7 +492,7 @@ static string getFilePath(const Parser &parser,const MediaInfo &media_info, TcpS
  * @param parser http请求
  * @param cb 回调对象
  */
-void HttpFileManager::onAccessPath(TcpSession &sender, Parser &parser, const HttpFileManager::invoker &cb) {
+void HttpFileManager::onAccessPath(Session &sender, Parser &parser, const HttpFileManager::invoker &cb) {
     auto fullUrl = string(HTTP_SCHEMA) + "://" + parser["Host"] + parser.FullUrl();
     MediaInfo media_info(fullUrl);
     auto file_path = getFilePath(parser, media_info, sender);

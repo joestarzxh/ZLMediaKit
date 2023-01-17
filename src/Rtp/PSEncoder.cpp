@@ -11,7 +11,9 @@
 #if defined(ENABLE_RTPPROXY)
 
 #include "PSEncoder.h"
+#include "Common/config.h"
 #include "Extension/H264.h"
+#include "Extension/CommonRtp.h"
 #include "Rtsp/RtspMuxer.h"
 
 using namespace toolkit;
@@ -23,7 +25,7 @@ PSEncoderImp::PSEncoderImp(uint32_t ssrc, uint8_t payload_type) : MpegMuxer(true
     _rtp_encoder = std::make_shared<CommonRtpEncoder>(CodecInvalid, ssrc, video_mtu, 90000, payload_type, 0);
     _rtp_encoder->setRtpRing(std::make_shared<RtpRing::RingType>());
     _rtp_encoder->getRtpRing()->setDelegate(std::make_shared<RingDelegateHelper>([this](RtpPacket::Ptr rtp, bool is_key){
-        onRTP(std::move(rtp));
+        onRTP(std::move(rtp),is_key);
     }));
     InfoL << this << " " << printSSRC(_rtp_encoder->getSsrc());
 }
@@ -32,11 +34,11 @@ PSEncoderImp::~PSEncoderImp() {
     InfoL << this << " " << printSSRC(_rtp_encoder->getSsrc());
 }
 
-void PSEncoderImp::onWrite(std::shared_ptr<Buffer> buffer, uint32_t stamp, bool key_pos) {
+void PSEncoderImp::onWrite(std::shared_ptr<Buffer> buffer, uint64_t stamp, bool key_pos) {
     if (!buffer) {
         return;
     }
-    _rtp_encoder->inputFrame(std::make_shared<FrameFromPtr>(buffer->data(), buffer->size(), stamp, stamp));
+    _rtp_encoder->inputFrame(std::make_shared<FrameFromPtr>(buffer->data(), buffer->size(), stamp, stamp,0,key_pos));
 }
 
 }//namespace mediakit

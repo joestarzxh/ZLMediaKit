@@ -13,7 +13,7 @@
 
 #if defined(ENABLE_HLS) || defined(ENABLE_RTPPROXY)
 
-#include "mpeg-ts-proto.h"
+#include "mpeg-ts.h"
 #include "mpeg-muxer.h"
 
 using namespace toolkit;
@@ -63,10 +63,10 @@ bool MpegMuxer::inputFrame(const Frame::Ptr &frame) {
         case CodecH264:
         case CodecH265: {
             //这里的代码逻辑是让SPS、PPS、IDR这些时间戳相同的帧打包到一起当做一个帧处理，
-            return _frame_merger.inputFrame(frame,[&](uint32_t dts, uint32_t pts, const Buffer::Ptr &buffer, bool have_idr) {
+            return _frame_merger.inputFrame(frame,[this, track_id](uint64_t dts, uint64_t pts, const Buffer::Ptr &buffer, bool have_idr) {
                 _key_pos = have_idr;
                 //取视频时间戳为TS的时间戳
-                _timestamp = (uint32_t) dts;
+                _timestamp = dts;
                 _max_cache_size = 512 + 1.2 * buffer->size();
                 mpeg_muxer_input((::mpeg_muxer_t *)_context, track_id, have_idr ? 0x0001 : 0, pts * 90LL,dts * 90LL, buffer->data(), buffer->size());
                 flushCache();
@@ -83,7 +83,7 @@ bool MpegMuxer::inputFrame(const Frame::Ptr &frame) {
         default: {
             if (!_have_video) {
                 //没有视频时，才以音频时间戳为TS的时间戳
-                _timestamp = (uint32_t) frame->dts();
+                _timestamp = frame->dts();
             }
             _max_cache_size = 512 + 1.2 * frame->size();
             mpeg_muxer_input((::mpeg_muxer_t *)_context, track_id, frame->keyFrame() ? 0x0001 : 0, frame->pts() * 90LL, frame->dts() * 90LL, frame->data(), frame->size());
@@ -151,6 +151,10 @@ void MpegMuxer::releaseContext() {
     }
     _codec_to_trackid.clear();
     _frame_merger.clear();
+}
+
+void MpegMuxer::flush() {
+    _frame_merger.flush();
 }
 
 }//mediakit

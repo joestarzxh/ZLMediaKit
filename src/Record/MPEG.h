@@ -18,10 +18,8 @@
 #include <unordered_map>
 #include "Extension/Frame.h"
 #include "Extension/Track.h"
-#include "Util/File.h"
 #include "Common/MediaSink.h"
-#include "Common/Stamp.h"
-
+#include "Util/ResourcePool.h"
 namespace mediakit {
 
 //该类用于产生MPEG-TS/MPEG-PS
@@ -45,6 +43,11 @@ public:
      */
     bool inputFrame(const Frame::Ptr &frame) override;
 
+    /**
+     * 刷新输出所有frame缓存
+     */
+    void flush() override;
+
 protected:
     /**
      * 输出ts/ps数据回调
@@ -52,7 +55,7 @@ protected:
      * @param timestamp 时间戳，单位毫秒
      * @param key_pos 是否为关键帧的第一个ts/ps包，用于确保ts切片第一帧为关键帧
      */
-    virtual void onWrite(std::shared_ptr<toolkit::Buffer> buffer, uint32_t timestamp, bool key_pos) = 0;
+    virtual void onWrite(std::shared_ptr<toolkit::Buffer> buffer, uint64_t timestamp, bool key_pos) = 0;
 
 private:
     void createContext();
@@ -65,7 +68,7 @@ private:
     bool _have_video = false;
     bool _key_pos = false;
     uint32_t _max_cache_size = 0;
-    uint32_t _timestamp = 0;
+    uint64_t _timestamp = 0;
     struct mpeg_muxer_t *_context = nullptr;
     std::unordered_map<int, int/*track_id*/> _codec_to_trackid;
     FrameMerger _frame_merger{FrameMerger::h264_prefix};
@@ -90,7 +93,7 @@ public:
     bool inputFrame(const Frame::Ptr &frame) override { return false; }
 
 protected:
-    virtual void onWrite(std::shared_ptr<toolkit::Buffer> buffer, uint32_t timestamp, bool key_pos) = 0;
+    virtual void onWrite(std::shared_ptr<toolkit::Buffer> buffer, uint64_t timestamp, bool key_pos) = 0;
 };
 
 }//namespace mediakit

@@ -124,26 +124,32 @@ void H264RtmpEncoder::makeConfigPacket(){
     }
 }
 
+void H264RtmpEncoder::flush() {
+    inputFrame(nullptr);
+}
+
 bool H264RtmpEncoder::inputFrame(const Frame::Ptr &frame) {
-    auto data = frame->data() + frame->prefixSize();
-    auto len = frame->size() - frame->prefixSize();
-    auto type = H264_TYPE(data[0]);
-    switch (type) {
-        case H264Frame::NAL_SPS: {
-            if (!_got_config_frame) {
-                _sps = string(data, len);
-                makeConfigPacket();
+    if (frame) {
+        auto data = frame->data() + frame->prefixSize();
+        auto len = frame->size() - frame->prefixSize();
+        auto type = H264_TYPE(data[0]);
+        switch (type) {
+            case H264Frame::NAL_SPS: {
+                if (!_got_config_frame) {
+                    _sps = string(data, len);
+                    makeConfigPacket();
+                }
+                break;
             }
-            break;
-        }
-        case H264Frame::NAL_PPS: {
-            if (!_got_config_frame) {
-                _pps = string(data, len);
-                makeConfigPacket();
+            case H264Frame::NAL_PPS: {
+                if (!_got_config_frame) {
+                    _pps = string(data, len);
+                    makeConfigPacket();
+                }
+                break;
             }
-            break;
+            default: break;
         }
-        default : break;
     }
 
     if (!_rtmp_packet) {
@@ -152,7 +158,7 @@ bool H264RtmpEncoder::inputFrame(const Frame::Ptr &frame) {
         _rtmp_packet->buffer.resize(5);
     }
 
-    return _merger.inputFrame(frame, [this](uint32_t dts, uint32_t pts, const Buffer::Ptr &, bool have_key_frame) {
+    return _merger.inputFrame(frame, [this](uint64_t dts, uint64_t pts, const Buffer::Ptr &, bool have_key_frame) {
         //flags
         _rtmp_packet->buffer[0] = FLV_CODEC_H264 | ((have_key_frame ? FLV_KEY_FRAME : FLV_INTER_FRAME) << 4);
         //not config

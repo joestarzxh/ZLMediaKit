@@ -10,19 +10,21 @@
 
 #include "Sdp.h"
 #include "Rtsp/Rtsp.h"
+#include "Common/config.h"
 #include <cinttypes>
 
 using namespace std;
 using namespace toolkit;
-using namespace mediakit;
 
-namespace RTC {
+namespace mediakit {
+
+namespace Rtc {
 #define RTC_FIELD "rtc."
 const string kPreferredCodecA = RTC_FIELD"preferredCodecA";
 const string kPreferredCodecV = RTC_FIELD"preferredCodecV";
 static onceToken token([]() {
     mINI::Instance()[kPreferredCodecA] = "PCMU,PCMA,opus,mpeg4-generic";
-    mINI::Instance()[kPreferredCodecV] = "H264,H265,AV1X,VP9,VP8";
+    mINI::Instance()[kPreferredCodecV] = "H264,H265,AV1,VP9,VP8";
 });
 }
 
@@ -556,7 +558,7 @@ void SdpAttrRtpMap::parse(const string &str)  {
 
 string SdpAttrRtpMap::toString() const  {
     if (value.empty()) {
-        value = to_string(pt) + " " + codec + "/" + to_string(sample_rate);
+        value = to_string((int)pt) + " " + codec + "/" + to_string(sample_rate);
         if (channel) {
             value += '/';
             value += to_string(channel);
@@ -574,7 +576,7 @@ void SdpAttrRtcpFb::parse(const string &str_in)  {
 
 string SdpAttrRtcpFb::toString() const  {
     if (value.empty()) {
-        value = to_string(pt) + " " + rtcp_type;
+        value = to_string((int)pt) + " " + rtcp_type;
     }
     return SdpItem::toString();
 }
@@ -598,7 +600,7 @@ void SdpAttrFmtp::parse(const string &str)  {
 
 string SdpAttrFmtp::toString() const  {
     if (value.empty()) {
-        value = to_string(pt);
+        value = to_string((int)pt);
         int i = 0;
         for (auto &pr : fmtp) {
             value += (i++  ? ';' : ' ');
@@ -771,7 +773,6 @@ void RtcSession::loadFrom(const string &str) {
     session_name = sdp.getSessionName();
     session_info = sdp.getSessionInfo();
     connection = sdp.getConnection();
-    bandwidth = sdp.getBandwidth();
     time = sdp.getSessionTime();
     msid_semantic = sdp.getItemClass<SdpAttrMsidSemantic>('a', "msid-semantic");
     for (auto &media : sdp.medias) {
@@ -783,6 +784,7 @@ void RtcSession::loadFrom(const string &str) {
         rtc_media.type = mline.type;
         rtc_media.port = mline.port;
         rtc_media.addr = media.getItemClass<SdpConnection>('c');
+        rtc_media.bandwidth = media.getItemClass<SdpBandwidth>('b');
         rtc_media.ice_ufrag = media.getStringItem('a', "ice-ufrag");
         rtc_media.ice_pwd = media.getStringItem('a', "ice-pwd");
         rtc_media.role = media.getItemClass<SdpAttrSetup>('a', "setup").role;
@@ -1060,9 +1062,6 @@ RtcSessionSdp::Ptr RtcSession::toRtcSessionSdp() const{
     if(connection.empty()){
         sdp.addItem(std::make_shared<SdpConnection>(connection));
     }
-    if (!bandwidth.empty()) {
-        sdp.addItem(std::make_shared<SdpBandwidth>(bandwidth));
-    }
     sdp.addAttr(std::make_shared<SdpAttrGroup>(group));
     sdp.addAttr(std::make_shared<SdpAttrMsidSemantic>(msid_semantic));
     for (auto &m : media) {
@@ -1073,13 +1072,16 @@ RtcSessionSdp::Ptr RtcSession::toRtcSessionSdp() const{
         mline->port = m.port;
         mline->proto = m.proto;
         for (auto &p : m.plan) {
-            mline->fmts.emplace_back(to_string(p.pt));
+            mline->fmts.emplace_back(to_string((int)p.pt));
         }
         if (m.type == TrackApplication) {
             mline->fmts.emplace_back("webrtc-datachannel");
         }
         sdp_media.addItem(std::move(mline));
         sdp_media.addItem(std::make_shared<SdpConnection>(m.addr));
+        if (!m.bandwidth.empty() && m.type != TrackAudio) {
+            sdp_media.addItem(std::make_shared<SdpBandwidth>(m.bandwidth));
+        }
         if (!m.rtcp_addr.empty()) {
             sdp_media.addAttr(std::make_shared<SdpAttrRtcp>(m.rtcp_addr));
         }
@@ -1203,7 +1205,9 @@ RtcSessionSdp::Ptr RtcSession::toRtcSessionSdp() const{
         }
 
         for (auto &cand : m.candidate) {
-            sdp_media.addAttr(std::make_shared<SdpAttrCandidate>(cand));
+            if (cand.port) {
+                sdp_media.addAttr(std::make_shared<SdpAttrCandidate>(cand));
+            }
         }
     }
     return ret;
@@ -1311,6 +1315,10 @@ void RtcSession::checkValid() const{
     bool have_active_media = false;
     for (auto &item : media) {
         item.checkValid();
+
+        if (TrackApplication == item.type) {
+            have_active_media = true;
+        }
         switch (item.direction) {
             case RtpDirection::sendrecv:
             case RtpDirection::sendonly:
@@ -1346,6 +1354,10 @@ bool RtcSession::supportSimulcast() const {
         }
     }
     return false;
+}
+
+bool RtcSession::isOnlyDatachannel() const {
+    return 1 == media.size() && TrackApplication == media[0].type;
 }
 
 string const SdpConst::kTWCCRtcpFb = "transport-cc";
@@ -1396,7 +1408,7 @@ void RtcConfigure::RtcTrackConfigure::setDefaultSetting(TrackType type){
     switch (type) {
         case TrackAudio: {
             //此处调整偏好的编码格式优先级
-            GET_CONFIG_FUNC(vector<CodecId>, s_preferred_codec, RTC::kPreferredCodecA, toCodecArray);
+            GET_CONFIG_FUNC(vector<CodecId>, s_preferred_codec, Rtc::kPreferredCodecA, toCodecArray);
             CHECK(!s_preferred_codec.empty(), "rtc音频偏好codec不能为空");
             preferred_codec = s_preferred_codec;
 
@@ -1415,7 +1427,7 @@ void RtcConfigure::RtcTrackConfigure::setDefaultSetting(TrackType type){
         }
         case TrackVideo: {
             //此处调整偏好的编码格式优先级
-            GET_CONFIG_FUNC(vector<CodecId>, s_preferred_codec, RTC::kPreferredCodecV, toCodecArray);
+            GET_CONFIG_FUNC(vector<CodecId>, s_preferred_codec, Rtc::kPreferredCodecV, toCodecArray);
             CHECK(!s_preferred_codec.empty(), "rtc视频偏好codec不能为空");
             preferred_codec = s_preferred_codec;
 
@@ -1431,7 +1443,8 @@ void RtcConfigure::RtcTrackConfigure::setDefaultSetting(TrackType type){
                     {RtpExtType::color_space,                 RtpDirection::sendrecv},
                     {RtpExtType::video_content_type,          RtpDirection::sendrecv},
                     {RtpExtType::playout_delay,               RtpDirection::sendrecv},
-                    {RtpExtType::video_orientation,           RtpDirection::sendrecv},
+                    //手机端推webrtc 会带有旋转角度，rtc协议能正常播放 其他协议拉流画面旋转
+                    //{RtpExtType::video_orientation,           RtpDirection::sendrecv},
                     {RtpExtType::toffset,                     RtpDirection::sendrecv},
                     {RtpExtType::framemarking,                RtpDirection::sendrecv}
             };
@@ -1521,15 +1534,17 @@ void RtcConfigure::enableREMB(bool enable, TrackType type){
     }
 }
 
-shared_ptr<RtcSession> RtcConfigure::createAnswer(const RtcSession &offer){
+shared_ptr<RtcSession> RtcConfigure::createAnswer(const RtcSession &offer) const {
     shared_ptr<RtcSession> ret = std::make_shared<RtcSession>();
     ret->version = offer.version;
     ret->origin = offer.origin;
     ret->session_name = offer.session_name;
     ret->msid_semantic = offer.msid_semantic;
-    matchMedia(ret, TrackAudio, offer.media, audio);
-    matchMedia(ret, TrackVideo, offer.media, video);
-    matchMedia(ret, TrackApplication, offer.media, application);
+
+    for (auto &m : offer.media) {
+        matchMedia(ret, m);
+    }
+
     //设置音视频端口复用
     if (!offer.group.mids.empty()) {
         for (auto &m : ret->media) {
@@ -1573,153 +1588,162 @@ static DtlsRole mathDtlsRole(DtlsRole role){
     }
 }
 
-void RtcConfigure::matchMedia(const shared_ptr<RtcSession> &ret, TrackType type, const vector<RtcMedia> &medias, const RtcTrackConfigure &configure){
+void RtcConfigure::matchMedia(const std::shared_ptr<RtcSession> &ret,const RtcMedia &offer_media) const {
     bool check_profile = true;
     bool check_codec = true;
+    const RtcTrackConfigure *cfg_ptr = nullptr;
+
+    switch (offer_media.type) {
+        case TrackAudio: cfg_ptr = &audio; break;
+        case TrackVideo: cfg_ptr = &video; break;
+        case TrackApplication: cfg_ptr = &application; break;
+        default: return;
+    }
+    auto &configure = *cfg_ptr;
 
 RETRY:
 
-    for (auto &offer_media : medias) {
-        if (offer_media.type != type) {
+    if (offer_media.type == TrackApplication) {
+        RtcMedia answer_media = offer_media;
+        answer_media.role = mathDtlsRole(offer_media.role);
+#ifdef ENABLE_SCTP
+        answer_media.direction = matchDirection(offer_media.direction, configure.direction);
+        answer_media.candidate = configure.candidate;
+        answer_media.ice_ufrag = configure.ice_ufrag;
+        answer_media.ice_pwd = configure.ice_pwd;
+        answer_media.fingerprint = configure.fingerprint;
+        answer_media.ice_lite = configure.ice_lite;
+#else
+        answer_media.direction = RtpDirection::inactive;
+#endif
+        ret->media.emplace_back(answer_media);
+        return;
+    }
+    for (auto &codec : configure.preferred_codec) {
+        if (offer_media.ice_lite && configure.ice_lite) {
+            WarnL << "answer sdp配置为ice_lite模式，与offer sdp中的ice_lite模式冲突";
             continue;
         }
-        if (type == TrackApplication) {
-            RtcMedia answer_media = offer_media;
-            answer_media.role = mathDtlsRole(offer_media.role);
-#ifdef ENABLE_SCTP
-            answer_media.direction = matchDirection(offer_media.direction, configure.direction);
-            answer_media.candidate = configure.candidate;
-#else
-            answer_media.direction = RtpDirection::inactive;
-#endif
-            ret->media.emplace_back(answer_media);
-            return;
+        const RtcCodecPlan *selected_plan = nullptr;
+        for (auto &plan : offer_media.plan) {
+            //先检查编码格式是否为偏好
+            if (check_codec && getCodecId(plan.codec) != codec) {
+                continue;
+            }
+            //命中偏好的编码格式,然后检查规格
+            if (check_profile && !onCheckCodecProfile(plan, codec)) {
+                continue;
+            }
+            //找到中意的codec
+            selected_plan = &plan;
+            break;
         }
-        for (auto &codec : configure.preferred_codec) {
-            if (offer_media.ice_lite && configure.ice_lite) {
-                WarnL << "answer sdp配置为ice_lite模式，与offer sdp中的ice_lite模式冲突";
-                continue;
-            }
-            const RtcCodecPlan *selected_plan = nullptr;
+        if (!selected_plan) {
+            //offer中该媒体的所有的codec都不支持
+            continue;
+        }
+        RtcMedia answer_media;
+        answer_media.type = offer_media.type;
+        answer_media.mid = offer_media.mid;
+        answer_media.proto = offer_media.proto;
+        answer_media.port = offer_media.port;
+        answer_media.addr = offer_media.addr;
+        answer_media.bandwidth = offer_media.bandwidth;
+        answer_media.rtcp_addr = offer_media.rtcp_addr;
+        answer_media.rtcp_mux = offer_media.rtcp_mux && configure.rtcp_mux;
+        answer_media.rtcp_rsize = offer_media.rtcp_rsize && configure.rtcp_rsize;
+        answer_media.ice_trickle = offer_media.ice_trickle && configure.ice_trickle;
+        answer_media.ice_renomination = offer_media.ice_renomination && configure.ice_renomination;
+        answer_media.ice_ufrag = configure.ice_ufrag;
+        answer_media.ice_pwd = configure.ice_pwd;
+        answer_media.fingerprint = configure.fingerprint;
+        answer_media.ice_lite = configure.ice_lite;
+        answer_media.candidate = configure.candidate;
+        // copy simulicast setting
+        answer_media.rtp_rids = offer_media.rtp_rids;
+        answer_media.rtp_ssrc_sim = offer_media.rtp_ssrc_sim;
+
+        answer_media.role = mathDtlsRole(offer_media.role);
+
+        //如果codec匹配失败，那么禁用该track
+        answer_media.direction = check_codec ? matchDirection(offer_media.direction, configure.direction)
+                                             : RtpDirection::inactive;
+        if (answer_media.direction == RtpDirection::invalid) {
+            continue;
+        }
+        if (answer_media.direction == RtpDirection::sendrecv) {
+            //如果是收发双向，那么我们拷贝offer sdp的ssrc，确保ssrc一致
+            answer_media.rtp_rtx_ssrc = offer_media.rtp_rtx_ssrc;
+        }
+
+        //添加媒体plan
+        answer_media.plan.emplace_back(*selected_plan);
+        onSelectPlan(answer_media.plan.back(), codec);
+
+        set<uint8_t> pt_selected = {selected_plan->pt};
+
+        //添加rtx,red,ulpfec plan
+        if (configure.support_red || configure.support_rtx || configure.support_ulpfec) {
             for (auto &plan : offer_media.plan) {
-                //先检查编码格式是否为偏好
-                if (check_codec && getCodecId(plan.codec) != codec) {
+                if (!strcasecmp(plan.codec.data(), "rtx")) {
+                    if (configure.support_rtx && atoi(plan.getFmtp("apt").data()) == selected_plan->pt) {
+                        answer_media.plan.emplace_back(plan);
+                        pt_selected.emplace(plan.pt);
+                    }
                     continue;
                 }
-                //命中偏好的编码格式,然后检查规格
-                if (check_profile && !onCheckCodecProfile(plan, codec)) {
+                if (!strcasecmp(plan.codec.data(), "red")) {
+                    if (configure.support_red) {
+                        answer_media.plan.emplace_back(plan);
+                        pt_selected.emplace(plan.pt);
+                    }
                     continue;
                 }
-                //找到中意的codec
-                selected_plan = &plan;
-                break;
-            }
-            if (!selected_plan) {
-                //offer中该媒体的所有的codec都不支持
-                continue;
-            }
-            RtcMedia answer_media;
-            answer_media.type = offer_media.type;
-            answer_media.mid = offer_media.mid;
-            answer_media.proto = offer_media.proto;
-            answer_media.port = offer_media.port;
-            answer_media.addr = offer_media.addr;
-            answer_media.rtcp_addr = offer_media.rtcp_addr;
-            answer_media.rtcp_mux = offer_media.rtcp_mux && configure.rtcp_mux;
-            answer_media.rtcp_rsize = offer_media.rtcp_rsize && configure.rtcp_rsize;
-            answer_media.ice_trickle = offer_media.ice_trickle && configure.ice_trickle;
-            answer_media.ice_renomination = offer_media.ice_renomination && configure.ice_renomination;
-            answer_media.ice_ufrag = configure.ice_ufrag;
-            answer_media.ice_pwd = configure.ice_pwd;
-            answer_media.fingerprint = configure.fingerprint;
-            answer_media.ice_lite = configure.ice_lite;
-            answer_media.candidate = configure.candidate;
-            // copy simulicast setting
-            answer_media.rtp_rids = offer_media.rtp_rids;
-            answer_media.rtp_ssrc_sim = offer_media.rtp_ssrc_sim;
-
-            answer_media.role = mathDtlsRole(offer_media.role);
-
-            //如果codec匹配失败，那么禁用该track
-            answer_media.direction = check_codec ? matchDirection(offer_media.direction, configure.direction)
-                                                 : RtpDirection::inactive;
-            if (answer_media.direction == RtpDirection::invalid) {
-                continue;
-            }
-            if (answer_media.direction == RtpDirection::sendrecv) {
-                //如果是收发双向，那么我们拷贝offer sdp的ssrc，确保ssrc一致
-                answer_media.rtp_rtx_ssrc = offer_media.rtp_rtx_ssrc;
-            }
-
-            //添加媒体plan
-            answer_media.plan.emplace_back(*selected_plan);
-            onSelectPlan(answer_media.plan.back(), codec);
-
-            set<uint8_t> pt_selected = {selected_plan->pt};
-
-            //添加rtx,red,ulpfec plan
-            if (configure.support_red || configure.support_rtx || configure.support_ulpfec) {
-                for (auto &plan : offer_media.plan) {
-                    if (!strcasecmp(plan.codec.data(), "rtx")) {
-                        if (configure.support_rtx && atoi(plan.getFmtp("apt").data()) == selected_plan->pt) {
-                            answer_media.plan.emplace_back(plan);
-                            pt_selected.emplace(plan.pt);
-                        }
-                        continue;
+                if (!strcasecmp(plan.codec.data(), "ulpfec")) {
+                    if (configure.support_ulpfec) {
+                        answer_media.plan.emplace_back(plan);
+                        pt_selected.emplace(plan.pt);
                     }
-                    if (!strcasecmp(plan.codec.data(), "red")) {
-                        if (configure.support_red) {
-                            answer_media.plan.emplace_back(plan);
-                            pt_selected.emplace(plan.pt);
-                        }
-                        continue;
-                    }
-                    if (!strcasecmp(plan.codec.data(), "ulpfec")) {
-                        if (configure.support_ulpfec) {
-                            answer_media.plan.emplace_back(plan);
-                            pt_selected.emplace(plan.pt);
-                        }
-                        continue;
-                    }
+                    continue;
                 }
             }
+        }
 
-            //对方和我方都支持的扩展，那么我们才支持
-            for (auto &ext : offer_media.extmap) {
-                auto it = configure.extmap.find(RtpExt::getExtType(ext.ext));
-                if (it != configure.extmap.end()) {
-                    auto new_dir = matchDirection(ext.direction, it->second);
-                    switch (new_dir) {
-                        case RtpDirection::invalid:
-                        case RtpDirection::inactive: continue;
-                        default: break;
-                    }
-                    answer_media.extmap.emplace_back(ext);
-                    answer_media.extmap.back().direction = new_dir;
+        //对方和我方都支持的扩展，那么我们才支持
+        for (auto &ext : offer_media.extmap) {
+            auto it = configure.extmap.find(RtpExt::getExtType(ext.ext));
+            if (it != configure.extmap.end()) {
+                auto new_dir = matchDirection(ext.direction, it->second);
+                switch (new_dir) {
+                    case RtpDirection::invalid:
+                    case RtpDirection::inactive: continue;
+                    default: break;
                 }
+                answer_media.extmap.emplace_back(ext);
+                answer_media.extmap.back().direction = new_dir;
             }
+        }
 
-            auto &rtcp_fb_ref = answer_media.plan[0].rtcp_fb;
-            rtcp_fb_ref.clear();
-            //对方和我方都支持的rtcpfb，那么我们才支持
-            for (auto &fp : selected_plan->rtcp_fb) {
-                if (configure.rtcp_fb.find(fp) != configure.rtcp_fb.end()) {
-                    //对方该rtcp被我们支持
-                    rtcp_fb_ref.emplace(fp);
-                }
+        auto &rtcp_fb_ref = answer_media.plan[0].rtcp_fb;
+        rtcp_fb_ref.clear();
+        //对方和我方都支持的rtcpfb，那么我们才支持
+        for (auto &fp : selected_plan->rtcp_fb) {
+            if (configure.rtcp_fb.find(fp) != configure.rtcp_fb.end()) {
+                //对方该rtcp被我们支持
+                rtcp_fb_ref.emplace(fp);
             }
+        }
 
 #if 0
-            //todo 此处为添加无效的plan，webrtc sdp通过调节plan pt顺序选择匹配的codec，意味着后面的codec其实放在sdp中是无意义的
-            for (auto &plan : offer_media.plan) {
-                if (pt_selected.find(plan.pt) == pt_selected.end()) {
-                    answer_media.plan.emplace_back(plan);
-                }
+        //todo 此处为添加无效的plan，webrtc sdp通过调节plan pt顺序选择匹配的codec，意味着后面的codec其实放在sdp中是无意义的
+        for (auto &plan : offer_media.plan) {
+            if (pt_selected.find(plan.pt) == pt_selected.end()) {
+                answer_media.plan.emplace_back(plan);
             }
-#endif
-            ret->media.emplace_back(answer_media);
-            return;
         }
+#endif
+        ret->media.emplace_back(answer_media);
+        return;
     }
 
     if (check_profile) {
@@ -1765,7 +1789,7 @@ void RtcConfigure::setPlayRtspInfo(const string &sdp){
 static const string kProfile{"profile-level-id"};
 static const string kMode{"packetization-mode"};
 
-bool RtcConfigure::onCheckCodecProfile(const RtcCodecPlan &plan, CodecId codec){
+bool RtcConfigure::onCheckCodecProfile(const RtcCodecPlan &plan, CodecId codec) const {
     if (_rtsp_audio_plan && codec == getCodecId(_rtsp_audio_plan->codec)) {
         if (plan.sample_rate != _rtsp_audio_plan->sample_rate || plan.channel != _rtsp_audio_plan->channel) {
             //音频采样率和通道数必须相同
@@ -1785,10 +1809,12 @@ bool RtcConfigure::onCheckCodecProfile(const RtcCodecPlan &plan, CodecId codec){
     return true;
 }
 
-void RtcConfigure::onSelectPlan(RtcCodecPlan &plan, CodecId codec){
+void RtcConfigure::onSelectPlan(RtcCodecPlan &plan, CodecId codec) const {
     if (_rtsp_video_plan && codec == CodecH264 && getCodecId(_rtsp_video_plan->codec) == CodecH264) {
         //h264时，设置packetization-mod为一致
         auto mode = _rtsp_video_plan->fmtp[kMode];
         plan.fmtp[kMode] = mode.empty() ? "0" : mode;
     }
 }
+
+} // namespace mediakit

@@ -10,8 +10,8 @@
 
 #include "Stamp.h"
 
-//时间戳最大允许跳变30秒，主要是防止网络抖动导致的跳变
-#define MAX_DELTA_STAMP (30 * 1000)
+//时间戳最大允许跳变3秒，主要是防止网络抖动导致的跳变
+#define MAX_DELTA_STAMP (3 * 1000)
 #define STAMP_LOOP_DELTA (60 * 1000)
 #define MAX_CTS 500
 #define ABS(x) ((x) > 0 ? (x) : (-x))
@@ -137,7 +137,7 @@ int64_t Stamp::getRelativeStamp() const {
     return _relative_stamp;
 }
 
-bool DtsGenerator::getDts(uint32_t pts, uint32_t &dts){
+bool DtsGenerator::getDts(uint64_t pts, uint64_t &dts){
     bool ret = false;
     if (pts == _last_pts) {
         //pts未变，说明dts也不会变，返回上次dts
@@ -167,7 +167,7 @@ bool DtsGenerator::getDts(uint32_t pts, uint32_t &dts){
 
 //该算法核心思想是对pts进行排序，排序好的pts就是dts。
 //排序有一定的滞后性，那么需要加上排序导致的时间戳偏移量
-bool DtsGenerator::getDts_l(uint32_t pts, uint32_t &dts){
+bool DtsGenerator::getDts_l(uint64_t pts, uint64_t &dts){
     if(_sorter_max_size == 1){
         //没有B帧，dts就等于pts
         dts = pts;

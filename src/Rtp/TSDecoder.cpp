@@ -55,7 +55,6 @@ const char *TSSegment::onSearchPacketTail(const char *data, size_t len) {
 
 #if defined(ENABLE_HLS)
 #include "mpeg-ts.h"
-#include "mpeg-ts-proto.h"
 TSDecoder::TSDecoder() : _ts_segment() {
     _ts_segment.setOnSegment([this](const char *data, size_t len){
         ts_demuxer_input(_demuxer_ctx,(uint8_t*)data,len);
@@ -99,14 +98,6 @@ ssize_t TSDecoder::input(const uint8_t *data, size_t bytes) {
         throw;
     }
     return bytes;
-}
-
-void TSDecoder::setOnDecode(Decoder::onDecode cb) {
-    _on_decode = std::move(cb);
-}
-
-void TSDecoder::setOnStream(Decoder::onStream cb) {
-    _on_stream = std::move(cb);
 }
 
 #endif//defined(ENABLE_HLS)

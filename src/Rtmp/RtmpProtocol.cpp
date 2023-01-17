@@ -8,11 +8,14 @@
  * may be found in the AUTHORS file in the root of the source tree.
  */
 
+#include <algorithm>
 #include "RtmpProtocol.h"
 #include "Rtmp/utils.h"
 #include "RtmpMediaSource.h"
-using namespace toolkit;
+#include "Util/util.h"
+
 using namespace std;
+using namespace toolkit;
 
 #define C1_DIGEST_SIZE 32
 #define C1_KEY_SIZE 128
@@ -286,12 +289,14 @@ const char *RtmpProtocol::onSearchPacketTail(const char *data,size_t len){
 }
 
 ////for client////
-void RtmpProtocol::startClientSession(const function<void()> &func) {
+void RtmpProtocol::startClientSession(const function<void()> &func, bool complex) {
     //发送 C0C1
     char handshake_head = HANDSHAKE_PLAINTEXT;
     onSendRawData(obtainBuffer(&handshake_head, 1));
     RtmpHandshake c1(0);
-    c1.create_complex_c0c1();
+    if (complex) {
+        c1.create_complex_c0c1();
+    }
     onSendRawData(obtainBuffer((char *) (&c1), sizeof(c1)));
     _next_step_func = [this, func](const char *data, size_t len) {
         //等待 S0+S1+S2
@@ -751,7 +756,9 @@ void RtmpProtocol::handle_chunk(RtmpPacket::Ptr packet) {
         }
 
         case MSG_WIN_SIZE: {
-            _windows_size = load_be32(&chunk_data.buffer[0]);
+            //如果窗口太小，会导致发送sendAcknowledgement时无限递归：https://github.com/ZLMediaKit/ZLMediaKit/issues/1839
+            //窗口太大，也可能导致fms服务器认为播放器心跳超时
+            _windows_size = min(max(load_be32(&chunk_data.buffer[0]), 32 * 1024U), 1280 * 1024U);
             TraceL << "MSG_WIN_SIZE:" << _windows_size;
             break;
         }
@@ -759,7 +766,7 @@ void RtmpProtocol::handle_chunk(RtmpPacket::Ptr packet) {
         case MSG_SET_PEER_BW: {
             _bandwidth = load_be32(&chunk_data.buffer[0]);
             _band_limit_type =  chunk_data.buffer[4];
-            TraceL << "MSG_SET_PEER_BW:" << _windows_size;
+            TraceL << "MSG_SET_PEER_BW:" << _bandwidth << " " << (int)_band_limit_type;
             break;
         }
 
@@ -803,7 +810,15 @@ void RtmpProtocol::handle_chunk(RtmpPacket::Ptr packet) {
             break;
         }
 
-        default: onRtmpChunk(std::move(packet)); break;
+        default: {
+            _bytes_recv += packet->size();
+            if (_windows_size > 0 && _bytes_recv - _bytes_recv_last >= _windows_size) {
+                _bytes_recv_last = _bytes_recv;
+                sendAcknowledgement(_bytes_recv);
+            }
+            onRtmpChunk(std::move(packet));
+            break;
+        }
     }
 }
 

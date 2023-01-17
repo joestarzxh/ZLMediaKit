@@ -19,7 +19,7 @@ namespace mediakit{
  */
 class AACRtpDecoder : public RtpCodec {
 public:
-    typedef std::shared_ptr<AACRtpDecoder> Ptr;
+    using Ptr = std::shared_ptr<AACRtpDecoder>;
 
     AACRtpDecoder(const Track::Ptr &track);
     ~AACRtpDecoder() {}
@@ -43,7 +43,7 @@ private:
     void flushData();
 
 private:
-    uint32_t _last_dts = 0;
+    uint64_t _last_dts = 0;
     std::string _aac_cfg;
     FrameImp::Ptr _frame;
 };
@@ -54,7 +54,7 @@ private:
  */
 class AACRtpEncoder : public AACRtpDecoder , public RtpInfo {
 public:
-    typedef std::shared_ptr<AACRtpEncoder> Ptr;
+    using Ptr = std::shared_ptr<AACRtpEncoder>;
 
     /**
      * @param ui32Ssrc ssrc
@@ -77,7 +77,7 @@ public:
     bool inputFrame(const Frame::Ptr &frame) override;
 
 private:
-    void makeAACRtp(const void *pData, size_t uiLen, bool bMark, uint32_t uiStamp);
+    void makeAACRtp(const void *data, size_t len, bool mark, uint64_t stamp);
 
 private:
     unsigned char _section_buf[1600];

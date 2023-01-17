@@ -11,8 +11,10 @@
 #ifndef ZLMEDIAKIT_PROCESS_H
 #define ZLMEDIAKIT_PROCESS_H
 
-#ifdef _WIN32
+#if defined(_WIN32)
+#if !defined(__MINGW32__)
 typedef int pid_t;
+#endif
 #else
 #include <sys/wait.h>
 #endif // _WIN32
@@ -29,10 +31,12 @@ public:
     bool wait(bool block = true);
     int exit_code();
 private:
+    int _exit_code = 0;
     pid_t _pid = -1;
     void *_handle = nullptr;
-    void* _process_stack = nullptr;
-    int _exit_code = 0;
+#if (defined(__linux) || defined(__linux__))
+    void *_process_stack = nullptr;
+#endif
 };
 
 

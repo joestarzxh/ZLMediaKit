@@ -2,6 +2,7 @@ apply plugin: 'com.android.application'
 
 android {
     compileSdkVersion 28
+    //ndkVersion "25.1.xxx"
     defaultConfig {
         applicationId "com.zlmediakit.demo"
         minSdkVersion 15
@@ -13,10 +14,11 @@ android {
             externalNativeBuild {
                 cmake {
                     cppFlags "-std=c++11 -frtti -fexceptions"
+                    arguments "-DENABLE_API=on", "-DENABLE_API_STATIC_LIB=on", "-DENABLE_TESTS=off", "-DENABLE_PLAYER=off", "-DENABLE_SERVER_LIB=on"
                 }
             }
             ndk {
-                abiFilters "armeabi-v7a"//, "arm64-v8a"
+                abiFilters "arm64-v8a" //, "armeabi-v7a"
             }
         }
     }

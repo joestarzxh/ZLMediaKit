@@ -1,10 +1,11 @@
-#ifdef ENABLE_SCTP
+﻿#ifdef ENABLE_SCTP
 
 #define MS_CLASS "RTC::SctpAssociation"
 // #define MS_LOG_DEV_LEVEL 3
 
 #include "SctpAssociation.hpp"
 #include "logger.h"
+#include <stdarg.h>
 #include <cstdlib> // std::malloc(), std::free()
 #include <cstring> // std::memset(), std::memcpy()
 #include <string>
