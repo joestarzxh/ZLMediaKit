@@ -82,8 +82,8 @@ public:
 
 API_EXPORT mk_track API_CALL mk_track_create(int codec_id, codec_args *args) {
     switch (getTrackType((CodecId) codec_id)) {
-        case TrackVideo: return new Track::Ptr(std::make_shared<VideoTrackForC>(codec_id, args));
-        case TrackAudio: return new Track::Ptr(std::make_shared<AudioTrackForC>(codec_id, args));
+        case TrackVideo: return (mk_track)new Track::Ptr(std::make_shared<VideoTrackForC>(codec_id, args));
+        case TrackAudio: return (mk_track)new Track::Ptr(std::make_shared<AudioTrackForC>(codec_id, args));
         default: WarnL << "unrecognized codec:" << codec_id; return nullptr;
     }
 }
@@ -95,7 +95,7 @@ API_EXPORT void API_CALL mk_track_unref(mk_track track) {
 
 API_EXPORT mk_track API_CALL mk_track_ref(mk_track track) {
     assert(track);
-    return new Track::Ptr(*( (Track::Ptr *)track));
+    return (mk_track)new Track::Ptr(*( (Track::Ptr *)track));
 }
 
 API_EXPORT int API_CALL mk_track_codec_id(mk_track track) {
@@ -114,9 +114,14 @@ API_EXPORT int API_CALL mk_track_bit_rate(mk_track track) {
 }
 
 API_EXPORT void *API_CALL mk_track_add_delegate(mk_track track, on_mk_frame_out cb, void *user_data) {
+    return mk_track_add_delegate2(track, cb, user_data, nullptr);
+}
+
+API_EXPORT void *API_CALL mk_track_add_delegate2(mk_track track, on_mk_frame_out cb, void *user_data, on_user_data_free user_data_free){
     assert(track && cb);
-    return (*((Track::Ptr *) track))->addDelegate([cb, user_data](const Frame::Ptr &frame) {
-        cb(user_data, (mk_frame) &frame);
+    std::shared_ptr<void> ptr(user_data, user_data_free ? user_data_free : [](void *) {});
+    return (*((Track::Ptr *) track))->addDelegate([cb, ptr](const Frame::Ptr &frame) {
+        cb(ptr.get(), (mk_frame) &frame);
         return true;
     });
 }

@@ -20,7 +20,7 @@ extern "C" {
 #endif
 
 ///////////////////////////////////////////事件线程/////////////////////////////////////////////
-typedef void* mk_thread;
+typedef struct mk_thread_t *mk_thread;
 
 /**
  * 获取tcp会话对象所在事件线程
@@ -52,7 +52,7 @@ API_EXPORT mk_thread API_CALL mk_thread_from_pool();
  */
 API_EXPORT mk_thread API_CALL mk_thread_from_pool_work();
 
-typedef void* mk_thread_pool;
+typedef struct mk_thread_pool_t *mk_thread_pool;
 
 /**
  * 创建线程池
@@ -87,6 +87,7 @@ typedef void (API_CALL *on_mk_async)(void *user_data);
  * @param user_data 用户数据指针
  */
 API_EXPORT void API_CALL mk_async_do(mk_thread ctx, on_mk_async cb, void *user_data);
+API_EXPORT void API_CALL mk_async_do2(mk_thread ctx, on_mk_async cb, void *user_data, on_user_data_free user_data_free);
 
 /**
  * 切换到事件线程并延时执行
@@ -96,6 +97,7 @@ API_EXPORT void API_CALL mk_async_do(mk_thread ctx, on_mk_async cb, void *user_d
  * @param user_data 用户数据指针
  */
 API_EXPORT void API_CALL mk_async_do_delay(mk_thread ctx, size_t ms, on_mk_async cb, void *user_data);
+API_EXPORT void API_CALL mk_async_do_delay2(mk_thread ctx, size_t ms, on_mk_async cb, void *user_data, on_user_data_free user_data_free);
 
 /**
  * 切换到事件线程并同步执行
@@ -106,7 +108,7 @@ API_EXPORT void API_CALL mk_async_do_delay(mk_thread ctx, size_t ms, on_mk_async
 API_EXPORT void API_CALL mk_sync_do(mk_thread ctx, on_mk_async cb, void *user_data);
 
 ///////////////////////////////////////////定时器/////////////////////////////////////////////
-typedef void* mk_timer;
+typedef struct mk_timer_t *mk_timer;
 
 /**
  * 定时器触发事件
@@ -123,6 +125,7 @@ typedef uint64_t (API_CALL *on_mk_timer)(void *user_data);
  * @return 定时器对象
  */
 API_EXPORT mk_timer API_CALL mk_timer_create(mk_thread ctx, uint64_t delay_ms, on_mk_timer cb, void *user_data);
+API_EXPORT mk_timer API_CALL mk_timer_create2(mk_thread ctx, uint64_t delay_ms, on_mk_timer cb, void *user_data, on_user_data_free user_data_free);
 
 /**
  * 销毁和取消定时器
@@ -132,7 +135,7 @@ API_EXPORT void API_CALL mk_timer_release(mk_timer ctx);
 
 ///////////////////////////////////////////信号量/////////////////////////////////////////////
 
-typedef void* mk_sem;
+typedef struct mk_sem_t *mk_sem;
 
 /**
  * 创建信号量
