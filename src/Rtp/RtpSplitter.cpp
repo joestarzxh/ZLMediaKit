@@ -13,11 +13,7 @@
 #include "RtpSplitter.h"
 namespace mediakit{
 
-static const char kEHOME_MAGIC[] = "\x01\x00\x01\x00";
 static const int  kEHOME_OFFSET = 256;
-
-RtpSplitter::RtpSplitter() {}
-RtpSplitter::~RtpSplitter() {}
 
 ssize_t RtpSplitter::onRecvHeader(const char *data,size_t len){
     //忽略偏移量
@@ -38,11 +34,10 @@ static bool isEhome(const char *data, size_t len){
     if (len < 4) {
         return false;
     }
-    if((data[0] == 0x01) && (data[1] == 0x00) && (data[2] >=0x01)){
+    if ((data[0] == 0x01) && (data[1] == 0x00) && (data[2] >= 0x01)) {
         return true;
     }
     return false;
-    //return memcmp(data, kEHOME_MAGIC, sizeof(kEHOME_MAGIC) - 1) == 0;
 }
 
 const char *RtpSplitter::onSearchPacketTail(const char *data, size_t len) {
@@ -51,24 +46,31 @@ const char *RtpSplitter::onSearchPacketTail(const char *data, size_t len) {
         return nullptr;
     }
 
-    if (isEhome(data, len)) {
-        //是ehome协议
-        if (len < kEHOME_OFFSET + 4) {
-            //数据不够
-            return nullptr;
+    if ( _is_ehome ) {
+        if (isEhome(data, len)) {
+            //是ehome协议
+            if (len < kEHOME_OFFSET + 4) {
+                //数据不够
+                return nullptr;
+            }
+            //忽略ehome私有头后是rtsp样式的rtp，多4个字节，
+            _offset = kEHOME_OFFSET + 4;
+            _is_ehome = true;
+            //忽略ehome私有头
+            return onSearchPacketTail_l(data + kEHOME_OFFSET + 2, len - kEHOME_OFFSET - 2);
         }
-        //忽略ehome私有头后是rtsp样式的rtp，多4个字节，
-        _offset = kEHOME_OFFSET + 4;
-        _is_ehome = true;
-        //忽略ehome私有头
-        return onSearchPacketTail_l(data + kEHOME_OFFSET + 2, len - kEHOME_OFFSET - 2);
+        _is_ehome = false;
     }
 
-    if (data[0] == '$') {
-        //可能是4个字节的rtp头
-        _offset = 4;
-        return onSearchPacketTail_l(data + 2, len - 2);
+    if ( _is_rtsp_interleaved ) {
+        if (data[0] == '$') {
+            //可能是4个字节的rtp头
+            _offset = 4;
+            return onSearchPacketTail_l(data + 2, len - 2);
+        }
+        _is_rtsp_interleaved = false;
     }
+    
     //两个字节的rtp头
     _offset = 2;
     return onSearchPacketTail_l(data, len);

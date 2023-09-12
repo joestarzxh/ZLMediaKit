@@ -26,14 +26,14 @@ static constexpr size_t kMaxCachedFrame = 200;
 namespace mediakit {
 
 RtpProcess::RtpProcess(const string &stream_id) {
-    _media_info._schema = kRtpAppName;
-    _media_info._vhost = DEFAULT_VHOST;
-    _media_info._app = kRtpAppName;
-    _media_info._streamid = stream_id;
+    _media_info.schema = kRtpAppName;
+    _media_info.vhost = DEFAULT_VHOST;
+    _media_info.app = kRtpAppName;
+    _media_info.stream = stream_id;
 
     GET_CONFIG(string, dump_dir, RtpProxy::kDumpDir);
     {
-        FILE *fp = !dump_dir.empty() ? File::create_file(File::absolutePath(_media_info._streamid + ".rtp", dump_dir).data(), "wb") : nullptr;
+        FILE *fp = !dump_dir.empty() ? File::create_file(File::absolutePath(_media_info.stream + ".rtp", dump_dir).data(), "wb") : nullptr;
         if (fp) {
             _save_file_rtp.reset(fp, [](FILE *fp) {
                 fclose(fp);
@@ -42,7 +42,7 @@ RtpProcess::RtpProcess(const string &stream_id) {
     }
 
     {
-        FILE *fp = !dump_dir.empty() ? File::create_file(File::absolutePath(_media_info._streamid + ".video", dump_dir).data(), "wb") : nullptr;
+        FILE *fp = !dump_dir.empty() ? File::create_file(File::absolutePath(_media_info.stream + ".video", dump_dir).data(), "wb") : nullptr;
         if (fp) {
             _save_file_video.reset(fp, [](FILE *fp) {
                 fclose(fp);
@@ -66,7 +66,11 @@ RtpProcess::~RtpProcess() {
     //流量统计事件广播
     GET_CONFIG(uint32_t, iFlowThreshold, General::kFlowThreshold);
     if (_total_bytes >= iFlowThreshold * 1024) {
-        NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastFlowReport, _media_info, _total_bytes, duration, false, static_cast<SockInfo &>(*this));
+        try {
+            NOTICE_EMIT(BroadcastFlowReportArgs, Broadcast::kBroadcastFlowReport, _media_info, _total_bytes, duration, false, *this);
+        } catch (std::exception &ex) {
+            WarnL << "Exception occurred: " << ex.what();
+        }
     }
 }
 
@@ -206,35 +210,31 @@ void RtpProcess::setOnDetach(function<void()> cb) {
 }
 
 string RtpProcess::get_peer_ip() {
-    if (!_addr) {
+    try {
+        return _addr ? SockUtil::inet_ntoa((sockaddr *)_addr.get()) : "::";
+    } catch (std::exception &ex) {
         return "::";
     }
-    return SockUtil::inet_ntoa((sockaddr *)_addr.get());
 }
 
 uint16_t RtpProcess::get_peer_port() {
-    if (!_addr) {
+    try {
+        return _addr ? SockUtil::inet_port((sockaddr *)_addr.get()) : 0;
+    } catch (std::exception &ex) {
         return 0;
     }
-    return SockUtil::inet_port((sockaddr *)_addr.get());
 }
 
 string RtpProcess::get_local_ip() {
-    if (_sock) {
-        return _sock->get_local_ip();
-    }
-    return "::";
+    return _sock ? _sock->get_local_ip() : "::";
 }
 
 uint16_t RtpProcess::get_local_port() {
-    if (_sock) {
-        return _sock->get_local_port();
-    }
-    return 0;
+    return _sock ? _sock->get_local_port() : 0;
 }
 
 string RtpProcess::getIdentifier() const {
-    return _media_info._streamid;
+    return _media_info.stream;
 }
 
 void RtpProcess::emitOnPublish() {
@@ -251,9 +251,7 @@ void RtpProcess::emitOnPublish() {
                 return;
             }
             if (err.empty()) {
-                strong_self->_muxer = std::make_shared<MultiMediaSourceMuxer>(strong_self->_media_info._vhost,
-                                                                              strong_self->_media_info._app,
-                                                                              strong_self->_media_info._streamid,0.0f,
+                strong_self->_muxer = std::make_shared<MultiMediaSourceMuxer>(strong_self->_media_info, 0.0f,
                                                                               option);
                 if (strong_self->_only_audio) {
                     strong_self->_muxer->setOnlyAudio();
@@ -268,9 +266,9 @@ void RtpProcess::emitOnPublish() {
     };
 
     //触发推流鉴权事件
-    auto flag = NoticeCenter::Instance().emitEvent(Broadcast::kBroadcastMediaPublish, MediaOriginType::rtp_push, _media_info, invoker, static_cast<SockInfo &>(*this));
+    auto flag = NOTICE_EMIT(BroadcastMediaPublishArgs, Broadcast::kBroadcastMediaPublish, MediaOriginType::rtp_push, _media_info, invoker, *this);
     if (!flag) {
-        //该事件无人监听,默认不鉴权
+        // 该事件无人监听,默认不鉴权
         invoker("", ProtocolOption());
     }
 }
@@ -291,7 +289,7 @@ toolkit::EventPoller::Ptr RtpProcess::getOwnerPoller(MediaSource &sender) {
     if (_sock) {
         return _sock->getPoller();
     }
-    throw std::runtime_error("RtpProcess::getOwnerPoller failed:" + _media_info._streamid);
+    throw std::runtime_error("RtpProcess::getOwnerPoller failed:" + _media_info.stream);
 }
 
 float RtpProcess::getLossRate(MediaSource &sender, TrackType type) {
@@ -299,7 +297,7 @@ float RtpProcess::getLossRate(MediaSource &sender, TrackType type) {
     if (!expected) {
         return -1;
     }
-    return geLostInterval() * 100 / expected;
+    return getLostInterval() * 100 / expected;
 }
 
 }//namespace mediakit

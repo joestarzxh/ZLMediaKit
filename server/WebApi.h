@@ -44,6 +44,8 @@ typedef enum {
     OtherFailed = -1,//业务代码执行失败，
     Success = 0//执行成功
 } ApiErr;
+
+extern const std::string kSecret;
 }//namespace API
 
 class ApiRetException: public std::runtime_error {
@@ -219,21 +221,29 @@ bool checkArgs(Args &args, const First &first, const KeyTypes &...keys) {
         throw InvalidArgsException("缺少必要参数:" #__VA_ARGS__); \
     }
 
-//检查http参数中是否附带secret密钥的宏，127.0.0.1的ip不检查密钥
+// 检查http参数中是否附带secret密钥的宏，127.0.0.1的ip不检查密钥
+// 同时检测是否在ip白名单内
 #define CHECK_SECRET() \
-    if(sender.get_peer_ip() != "127.0.0.1"){ \
+    do { \
+        auto ip = sender.get_peer_ip(); \
+        if (!HttpFileManager::isIPAllowed(ip)) { \
+            throw AuthException("Your ip is not allowed to access the service."); \
+        } \
         CHECK_ARGS("secret"); \
-        if(api_secret != allArgs["secret"]){ \
+        if (api_secret != allArgs["secret"]) { \
             throw AuthException("secret错误"); \
         } \
-    }
+    } while(false);
 
 void installWebApi();
 void unInstallWebApi();
 
-uint16_t openRtpServer(uint16_t local_port, const std::string &stream_id, int tcp_mode, const std::string &local_ip, bool re_use_port, uint32_t ssrc);
+#if defined(ENABLE_RTPPROXY)
+uint16_t openRtpServer(uint16_t local_port, const std::string &stream_id, int tcp_mode, const std::string &local_ip, bool re_use_port, uint32_t ssrc, bool only_audio);
 void connectRtpServer(const std::string &stream_id, const std::string &dst_url, uint16_t dst_port, const std::function<void(const toolkit::SockException &ex)> &cb);
 bool closeRtpServer(const std::string &stream_id);
+#endif
+
 Json::Value makeMediaSourceJson(mediakit::MediaSource &media);
 void getStatisticJson(const std::function<void(Json::Value &val)> &cb);
 void addStreamProxy(const std::string &vhost, const std::string &app, const std::string &stream, const std::string &url, int retry_count,

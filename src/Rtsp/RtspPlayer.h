@@ -84,7 +84,7 @@ protected:
     /////////////TcpClient override/////////////
     void onConnect(const toolkit::SockException &err) override;
     void onRecv(const toolkit::Buffer::Ptr &buf) override;
-    void onErr(const toolkit::SockException &ex) override;
+    void onError(const toolkit::SockException &ex) override;
 
 private:
     void onPlayResult_l(const toolkit::SockException &ex , bool handshake_done);
@@ -129,6 +129,7 @@ private:
     std::string _session_id;
     uint32_t _cseq_send = 1;
     std::string _content_base;
+    std::string _control_url;
     Rtsp::eRtpType _rtp_type = Rtsp::RTP_TCP;
 
     //当前rtp时间戳

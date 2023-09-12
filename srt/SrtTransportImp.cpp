@@ -6,19 +6,21 @@
 
 namespace SRT {
 SrtTransportImp::SrtTransportImp(const EventPoller::Ptr &poller)
-    : SrtTransport(poller) {}
+    : SrtTransport(poller) {
+}
 
 SrtTransportImp::~SrtTransportImp() {
-    InfoP(this);
     uint64_t duration = _alive_ticker.createdTime() / 1000;
     WarnP(this) << (_is_pusher ? "srt 推流器(" : "srt 播放器(") << _media_info.shortUrl() << ")断开,耗时(s):" << duration;
 
     // 流量统计事件广播
     GET_CONFIG(uint32_t, iFlowThreshold, General::kFlowThreshold);
     if (_total_bytes >= iFlowThreshold * 1024) {
-        NoticeCenter::Instance().emitEvent(
-            Broadcast::kBroadcastFlowReport, _media_info, _total_bytes, duration, !_is_pusher,
-            static_cast<SockInfo &>(*this));
+        try {
+            NOTICE_EMIT(BroadcastFlowReportArgs, Broadcast::kBroadcastFlowReport, _media_info, _total_bytes, duration, !_is_pusher, *this);
+        } catch (std::exception &ex) {
+            WarnL << "Exception occurred: " << ex.what();
+        }
     }
 }
 
@@ -35,7 +37,7 @@ void SrtTransportImp::onHandShakeFinished(std::string &streamid, struct sockaddr
         return;
     }
 
-    auto params = Parser::parseArgs(_media_info._param_strs);
+    auto params = Parser::parseArgs(_media_info.param_strs);
     if (params["m"] == "publish") {
         _is_pusher = true;
         _decoder = DecoderImp::createDecoder(DecoderImp::decoder_ts, this);
@@ -52,7 +54,7 @@ bool SrtTransportImp::parseStreamid(std::string &streamid) {
     if (!toolkit::start_with(streamid, "#!::")) {
         return false;
     }
-    _media_info._schema = SRT_SCHEMA;
+    _media_info.schema = SRT_SCHEMA;
 
     std::string real_streamid = streamid.substr(4);
     std::string vhost, app, stream_name;
@@ -70,10 +72,10 @@ bool SrtTransportImp::parseStreamid(std::string &streamid) {
             app = tmps[0];
             stream_name = tmps[1];
         } else {
-            if (_media_info._param_strs.empty()) {
-                _media_info._param_strs = it.first + "=" + it.second;
+            if (_media_info.param_strs.empty()) {
+                _media_info.param_strs = it.first + "=" + it.second;
             } else {
-                _media_info._param_strs += "&" + it.first + "=" + it.second;
+                _media_info.param_strs += "&" + it.first + "=" + it.second;
             }
         }
     }
@@ -82,15 +84,15 @@ bool SrtTransportImp::parseStreamid(std::string &streamid) {
     }
 
     if (vhost != "") {
-        _media_info._vhost = vhost;
+        _media_info.vhost = vhost;
     } else {
-        _media_info._vhost = DEFAULT_VHOST;
+        _media_info.vhost = DEFAULT_VHOST;
     }
 
-    _media_info._app = app;
-    _media_info._streamid = stream_name;
+    _media_info.app = app;
+    _media_info.stream = stream_name;
 
-    TraceL << " mediainfo=" << _media_info.shortUrl() << " params=" << _media_info._param_strs;
+    TraceL << " mediainfo=" << _media_info.shortUrl() << " params=" << _media_info.param_strs;
 
     return true;
 }
@@ -136,7 +138,7 @@ mediakit::MediaOriginType SrtTransportImp::getOriginType(mediakit::MediaSource &
 
 // 获取媒体源url或者文件路径
 std::string SrtTransportImp::getOriginUrl(mediakit::MediaSource &sender) const {
-    return _media_info._full_url;
+    return _media_info.full_url;
 }
 
 // 获取媒体源客户端相关信息
@@ -157,9 +159,7 @@ void SrtTransportImp::emitOnPublish() {
                 return;
             }
             if (err.empty()) {
-                strong_self->_muxer = std::make_shared<MultiMediaSourceMuxer>(strong_self->_media_info._vhost,
-                                                                              strong_self->_media_info._app,
-                                                                              strong_self->_media_info._streamid,0.0f,
+                strong_self->_muxer = std::make_shared<MultiMediaSourceMuxer>(strong_self->_media_info,0.0f,
                                                                               option);
                 strong_self->_muxer->setMediaListener(strong_self);
                 strong_self->doCachedFunc();
@@ -172,9 +172,7 @@ void SrtTransportImp::emitOnPublish() {
     };
 
     // 触发推流鉴权事件
-    auto flag = NoticeCenter::Instance().emitEvent(
-        Broadcast::kBroadcastMediaPublish, MediaOriginType::srt_push, _media_info, invoker,
-        static_cast<SockInfo &>(*this));
+    auto flag = NOTICE_EMIT(BroadcastMediaPublishArgs, Broadcast::kBroadcastMediaPublish, MediaOriginType::srt_push, _media_info, invoker, *this);
     if (!flag) {
         // 该事件无人监听,默认不鉴权
         invoker("", ProtocolOption());
@@ -197,8 +195,7 @@ void SrtTransportImp::emitOnPlay() {
         });
     };
 
-    auto flag = NoticeCenter::Instance().emitEvent(
-        Broadcast::kBroadcastMediaPlayed, _media_info, invoker, static_cast<SockInfo &>(*this));
+    auto flag = NOTICE_EMIT(BroadcastMediaPlayedArgs, Broadcast::kBroadcastMediaPlayed, _media_info, invoker, *this);
     if (!flag) {
         doPlay();
     }
@@ -207,7 +204,7 @@ void SrtTransportImp::emitOnPlay() {
 void SrtTransportImp::doPlay() {
     // 异步查找直播流
     MediaInfo info = _media_info;
-    info._schema = TS_SCHEMA;
+    info.schema = TS_SCHEMA;
     std::weak_ptr<SrtTransportImp> weak_self = static_pointer_cast<SrtTransportImp>(shared_from_this());
     MediaSource::findAsync(info, getSession(), [weak_self](const MediaSource::Ptr &src) {
         auto strong_self = weak_self.lock();
@@ -227,7 +224,11 @@ void SrtTransportImp::doPlay() {
             ts_src->pause(false);
             strong_self->_ts_reader = ts_src->getRing()->attach(strong_self->getPoller());
             weak_ptr<Session> weak_session = strong_self->getSession();
-            strong_self->_ts_reader->setGetInfoCB([weak_session]() { return weak_session.lock(); });
+            strong_self->_ts_reader->setGetInfoCB([weak_session]() {
+                Any ret;
+                ret.set(static_pointer_cast<SockInfo>(weak_session.lock()));
+                return ret;
+            });
             strong_self->_ts_reader->setDetachCB([weak_self]() {
                 auto strong_self = weak_self.lock();
                 if (!strong_self) {
@@ -281,13 +282,21 @@ uint16_t SrtTransportImp::get_local_port() {
 }
 
 std::string SrtTransportImp::getIdentifier() const {
-    return _media_info._streamid;
+    return _media_info.stream;
 }
 
 bool SrtTransportImp::inputFrame(const Frame::Ptr &frame) {
     if (_muxer) {
         //TraceL<<"before type "<<frame->getCodecName()<<" dts "<<frame->dts()<<" pts "<<frame->pts();
         auto frame_tmp = std::make_shared<FrameStamp>(frame, _type_to_stamp[frame->getTrackType()],false);
+        if(_type_to_stamp.size()>1){
+            // 有音视频，检查是否时间戳是否差距过大
+            auto diff = _type_to_stamp[TrackType::TrackVideo].getRelativeStamp() - _type_to_stamp[TrackType::TrackAudio].getRelativeStamp();
+            if(std::abs(diff) > 5000){
+                // 超过5s，应该同步 TODO
+                WarnL << _media_info.full_url <<" video or audio not sync : "<<diff;
+            }
+        }
         //TraceL<<"after type "<<frame_tmp->getCodecName()<<" dts "<<frame_tmp->dts()<<" pts "<<frame_tmp->pts();
         return _muxer->inputFrame(frame_tmp);
     }

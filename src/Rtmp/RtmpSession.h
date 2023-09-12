@@ -92,12 +92,12 @@ private:
     uint32_t _continue_push_ms = 0;
     //消耗的总流量
     uint64_t _total_bytes = 0;
-    std::string _tc_url;
     //数据接收超时计时器
     toolkit::Ticker _ticker;
     MediaInfo _media_info;
     std::weak_ptr<RtmpMediaSource> _play_src;
     AMFValue _push_metadata;
+    std::map<uint8_t, RtmpPacket::Ptr> _push_config_packets;
     RtmpMediaSourceImp::Ptr _push_src;
     std::shared_ptr<void> _push_src_ownership;
     RtmpMediaSource::RingType::RingReader::Ptr _ring_reader;
