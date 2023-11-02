@@ -370,6 +370,7 @@ Value makeMediaSourceJson(MediaSource &media){
             obj["loss"] = loss;
         }
         obj["frames"] = track->getFrames();
+        obj["duration"] = track->getDuration();
         switch(codec_type){
             case TrackAudio : {
                 auto audio_track = dynamic_pointer_cast<AudioTrack>(track);
@@ -1491,11 +1492,15 @@ void installWebApi() {
     // http://127.0.0.1/index/api/deleteRecordDirectroy?vhost=__defaultVhost__&app=live&stream=ss&period=2020-01-01
     api_regist("/index/api/deleteRecordDirectory", [](API_ARGS_MAP) {
         CHECK_SECRET();
-        CHECK_ARGS("vhost", "app", "stream");
+        CHECK_ARGS("vhost", "app", "stream", "period");
         auto tuple = MediaTuple{allArgs["vhost"], allArgs["app"], allArgs["stream"]};
         auto record_path = Recorder::getRecordPath(Recorder::type_mp4, tuple, allArgs["customized_path"]);
         auto period = allArgs["period"];
         record_path = record_path + period + "/";
+        auto name = allArgs["name"];
+        if (!name.empty()) {
+            record_path += name;
+        }
         int result = File::delete_file(record_path.data());
         if (result) {
             // 不等于0时代表失败
@@ -1911,24 +1916,28 @@ void installWebApi() {
 void unInstallWebApi(){
     {
         lock_guard<recursive_mutex> lck(s_proxyMapMtx);
-        s_proxyMap.clear();
+        auto proxyMap(std::move(s_proxyMap));
+        proxyMap.clear();
     }
 
     {
         lock_guard<recursive_mutex> lck(s_ffmpegMapMtx);
-        s_ffmpegMap.clear();
+        auto ffmpegMap(std::move(s_ffmpegMap));
+        ffmpegMap.clear();
     }
 
     {
         lock_guard<recursive_mutex> lck(s_proxyPusherMapMtx);
-        s_proxyPusherMap.clear();
+        auto proxyPusherMap(std::move(s_proxyPusherMap));
+        proxyPusherMap.clear();
     }
 
     {
 #if defined(ENABLE_RTPPROXY)
         RtpSelector::Instance().clear();
         lock_guard<recursive_mutex> lck(s_rtpServerMapMtx);
-        s_rtpServerMap.clear();
+        auto rtpServerMap(std::move(s_rtpServerMap));
+        rtpServerMap.clear();
 #endif
     }
     NoticeCenter::Instance().delListener(&web_api_tag);
