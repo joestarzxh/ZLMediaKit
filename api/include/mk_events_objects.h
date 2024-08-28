@@ -58,6 +58,8 @@ API_EXPORT const char *API_CALL mk_record_info_get_stream(const mk_record_info c
 ///////////////////////////////////////////Parser/////////////////////////////////////////////
 //Parser对象的C映射
 typedef struct mk_parser_t *mk_parser;
+//Parser对象中Headers foreach回调
+typedef void(API_CALL *on_mk_parser_header_cb)(void *user_data, const char *key, const char *val);
 //Parser::Method(),获取命令字，譬如GET/POST
 API_EXPORT const char* API_CALL mk_parser_get_method(const mk_parser ctx);
 //Parser::Url(),获取HTTP的访问url(不包括?后面的参数)
@@ -72,6 +74,8 @@ API_EXPORT const char* API_CALL mk_parser_get_tail(const mk_parser ctx);
 API_EXPORT const char* API_CALL mk_parser_get_header(const mk_parser ctx,const char *key);
 //Parser::Content(),获取HTTP body
 API_EXPORT const char* API_CALL mk_parser_get_content(const mk_parser ctx, size_t *length);
+//循环获取所有header
+API_EXPORT void API_CALL mk_parser_headers_for_each(const mk_parser ctx, on_mk_parser_header_cb cb, void *user_data);
 
 ///////////////////////////////////////////MediaInfo/////////////////////////////////////////////
 //MediaInfo对象的C映射
@@ -155,9 +159,11 @@ API_EXPORT int API_CALL mk_media_source_seek_to(const mk_media_source ctx,uint32
  */
 typedef void(API_CALL *on_mk_media_source_send_rtp_result)(void *user_data, uint16_t local_port, int err, const char *msg);
 
-//MediaSource::startSendRtp,请参考mk_media_start_send_rtp,注意ctx参数类型不一样
-API_EXPORT void API_CALL mk_media_source_start_send_rtp(const mk_media_source ctx, const char *dst_url, uint16_t dst_port, const char *ssrc, int is_udp, on_mk_media_source_send_rtp_result cb, void *user_data);
-API_EXPORT void API_CALL mk_media_source_start_send_rtp2(const mk_media_source ctx, const char *dst_url, uint16_t dst_port, const char *ssrc, int is_udp, on_mk_media_source_send_rtp_result cb, void *user_data, on_user_data_free user_data_free);
+// MediaSource::startSendRtp,请参考mk_media_start_send_rtp,注意ctx参数类型不一样
+API_EXPORT void API_CALL mk_media_source_start_send_rtp(const mk_media_source ctx, const char *dst_url, uint16_t dst_port, const char *ssrc, int con_type, on_mk_media_source_send_rtp_result cb, void *user_data);
+API_EXPORT void API_CALL mk_media_source_start_send_rtp2(const mk_media_source ctx, const char *dst_url, uint16_t dst_port, const char *ssrc, int con_type, on_mk_media_source_send_rtp_result cb, void *user_data, on_user_data_free user_data_free);
+API_EXPORT void API_CALL mk_media_source_start_send_rtp3(const mk_media_source ctx, const char *dst_url, uint16_t dst_port, const char *ssrc, int con_type, mk_ini options, on_mk_media_source_send_rtp_result cb, void *user_data);
+API_EXPORT void API_CALL mk_media_source_start_send_rtp4(const mk_media_source ctx, const char *dst_url, uint16_t dst_port, const char *ssrc, int con_type, mk_ini options, on_mk_media_source_send_rtp_result cb,void *user_data, on_user_data_free user_data_free);
 //MediaSource::stopSendRtp，请参考mk_media_stop_send_rtp,注意ctx参数类型不一样
 API_EXPORT int API_CALL mk_media_source_stop_send_rtp(const mk_media_source ctx);
 
