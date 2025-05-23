@@ -17,22 +17,22 @@ namespace mediakit {
 
 SrtPusher::SrtPusher(const EventPoller::Ptr &poller, const TSMediaSource::Ptr &src) : SrtCaller(poller) {
     _push_src = src;
-	DebugL;
+    DebugL;
 }
 
 SrtPusher::~SrtPusher(void) {
-	DebugL;
+    DebugL;
 }
 
 void SrtPusher::publish(const string &strUrl) {
-	DebugL;
+    DebugL;
     try {
         _url.parse(strUrl);
     } catch (std::exception &ex) {
         onResult(SockException(Err_other, StrPrinter << "illegal srt url:" << ex.what()));
         return;
     }
-	onConnect();
+    onConnect();
     return;
 }
 
@@ -110,6 +110,14 @@ void SrtPusher::doPublish() {
             strong_self->onSendTSData(ts, ++i == size); 
         });
     });
+}
+
+size_t SrtPusher::getSendSpeed() {
+    return SrtCaller::getSendSpeed();
+}
+
+size_t SrtPusher::getSendTotalBytes() {
+    return SrtCaller::getSendTotalBytes();
 }
 
 } /* namespace mediakit */

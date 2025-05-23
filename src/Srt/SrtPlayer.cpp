@@ -20,23 +20,23 @@ namespace mediakit {
 
 
 SrtPlayer::SrtPlayer(const EventPoller::Ptr &poller) 
-	: SrtCaller(poller) {
-	DebugL;
+    : SrtCaller(poller) {
+    DebugL;
 }
 
 SrtPlayer::~SrtPlayer(void) {
-	DebugL;
+    DebugL;
 }
 
 void SrtPlayer::play(const string &strUrl) {
-	DebugL;
+    DebugL;
     try {
         _url.parse(strUrl);
     } catch (std::exception &ex) {
         onResult(SockException(Err_other, StrPrinter << "illegal srt url:" << ex.what()));
         return;
     }
-	onConnect();
+    onConnect();
     return;
 }
 
@@ -45,11 +45,11 @@ void SrtPlayer::teardown() {
 }
 
 void SrtPlayer::pause(bool bPause) {
-	DebugL;
+    DebugL;
 }
 
 void SrtPlayer::speed(float speed) {
-	DebugL;
+    DebugL;
 }
 
 void SrtPlayer::onHandShakeFinished() {
@@ -120,6 +120,14 @@ std::string SrtPlayer::getPassphrase() {
     return passPhrase;
 }
 
+size_t SrtPlayer::getRecvSpeed() {
+    return SrtCaller::getRecvSpeed();
+}
+
+size_t SrtPlayer::getRecvTotalBytes() {
+    return SrtCaller::getRecvTotalBytes();
+}
+
 ///////////////////////////////////////////////////
 // SrtPlayerImp
 
@@ -146,16 +154,16 @@ void SrtPlayerImp::onSRTData(SRT::DataPacket::Ptr pkt) {
         return;
     }
 
-	auto strong_self = shared_from_this();
-	if (!_demuxer) {
+    auto strong_self = shared_from_this();
+    if (!_demuxer) {
         auto demuxer = std::make_shared<HlsDemuxer>();
         demuxer->start(getPoller(), this);
         _demuxer = std::move(demuxer);
-	}
+    }
 
-	if (!_decoder && _demuxer) {
-		_decoder = DecoderImp::createDecoder(DecoderImp::decoder_ts, _demuxer.get());
-	}
+    if (!_decoder && _demuxer) {
+        _decoder = DecoderImp::createDecoder(DecoderImp::decoder_ts, _demuxer.get());
+    }
 
     if (_decoder && _demuxer) {
         _decoder->input(reinterpret_cast<const uint8_t *>(pkt->payloadData()), pkt->payloadSize());
@@ -163,7 +171,6 @@ void SrtPlayerImp::onSRTData(SRT::DataPacket::Ptr pkt) {
 
     return;
 }
-
 
 } /* namespace mediakit */
 

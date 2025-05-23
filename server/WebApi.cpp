@@ -293,22 +293,24 @@ static inline void addHttpListener(){
             };
             ((HttpSession::HttpResponseInvoker &) invoker) = newInvoker;
         }
-
-        try {
-            it->second(parser, invoker, sender);
-        } catch (ApiRetException &ex) {
-            responseApi(ex.code(), ex.what(), invoker);
-            auto helper = static_cast<SocketHelper &>(sender).shared_from_this();
-            helper->getPoller()->async([helper, ex]() { helper->shutdown(SockException(Err_shutdown, ex.what())); }, false);
-        }
+        auto helper = static_cast<SocketHelper &>(sender).shared_from_this();
+        // 在本poller线程下一次事件循环时执行http api，防止占用NoticeCenter的锁
+        helper->getPoller()->async([it, parser, invoker, helper]() {
+            try {
+                it->second(parser, invoker, *helper);
+            } catch (ApiRetException &ex) {
+                responseApi(ex.code(), ex.what(), invoker);
+                helper->getPoller()->async([helper, ex]() { helper->shutdown(SockException(Err_shutdown, ex.what())); }, false);
+            }
 #ifdef ENABLE_MYSQL
-        catch(SqlException &ex){
-            responseApi(API::SqlFailed, StrPrinter << "操作数据库失败:" << ex.what() << ":" << ex.getSql(), invoker);
-        }
-#endif// ENABLE_MYSQL
-        catch (std::exception &ex) {
-            responseApi(API::Exception, ex.what(), invoker);
-        }
+            catch (SqlException &ex) {
+                responseApi(API::SqlFailed, StrPrinter << "操作数据库失败:" << ex.what() << ":" << ex.getSql(), invoker);
+            }
+#endif // ENABLE_MYSQL
+            catch (std::exception &ex) {
+                responseApi(API::Exception, ex.what(), invoker);
+            }
+        },false);
     });
 }
 
@@ -423,7 +425,10 @@ Value ToJson(const PusherProxy::Ptr& p) {
     item["url"] = p->getUrl();
     item["status"] = p->getStatus();
     item["liveSecs"] = p->getLiveSecs();
-    item["rePublishCount"] = p->getRePublishCount();
+    item["rePublishCount"] = p->getRePublishCount();    
+    item["bytesSpeed"] = (Json::UInt64) p->getSendSpeed();
+    item["totalBytes"] =(Json::UInt64) p->getSendTotalBytes();
+
     if (auto src = p->getSrc()) {
         dumpMediaTuple(src->getMediaTuple(), item["src"]);
     }
@@ -437,6 +442,9 @@ Value ToJson(const PlayerProxy::Ptr& p) {
     item["liveSecs"] = p->getLiveSecs();
     item["rePullCount"] = p->getRePullCount();
     item["totalReaderCount"] = p->totalReaderCount();
+    item["bytesSpeed"] = (Json::UInt64) p->getRecvSpeed();
+    item["totalBytes"] = (Json::UInt64) p->getRecvTotalBytes();
+
     dumpMediaTuple(p->getMediaTuple(), item["src"]);
     return item;
 }
@@ -447,7 +455,8 @@ Value makeMediaSourceJson(MediaSource &media){
     dumpMediaTuple(media.getMediaTuple(), item);
     item["createStamp"] = (Json::UInt64) media.getCreateStamp();
     item["aliveSecond"] = (Json::UInt64) media.getAliveSecond();
-    item["bytesSpeed"] = media.getBytesSpeed();
+    item["bytesSpeed"] = (Json::UInt64) media.getBytesSpeed();
+    item["totalBytes"] = (Json::UInt64) media.getTotalBytes();
     item["readerCount"] = media.readerCount();
     item["totalReaderCount"] = media.totalReaderCount();
     item["originType"] = (int) media.getOriginType();
@@ -1007,9 +1016,9 @@ void installWebApi() {
             },
             [](toolkit::Any &&info) -> toolkit::Any {
                 auto obj = std::make_shared<Value>();
-                auto &sock = info.get<SockInfo>();
-                fillSockInfo(*obj, &sock);
-                (*obj)["typeid"] = toolkit::demangle(typeid(sock).name());
+                auto &session = info.get<Session>();
+                fillSockInfo(*obj, &session);
+                (*obj)["typeid"] = toolkit::demangle(typeid(session).name());
                 toolkit::Any ret;
                 ret.set(obj);
                 return ret;
@@ -1189,25 +1198,27 @@ void installWebApi() {
 
         auto dst_url = allArgs["dst_url"];
         auto retry_count = allArgs["retry_count"].empty() ? -1 : allArgs["retry_count"].as<int>();
-        addStreamPusherProxy(allArgs["schema"],
-                             allArgs["vhost"],
-                             allArgs["app"],
-                             allArgs["stream"],
-                             allArgs["dst_url"],
-                             retry_count,
-                             allArgs["rtp_type"],
-                             allArgs["timeout_sec"],
-                             args,
-                             [invoker, val, headerOut, dst_url](const SockException &ex, const string &key) mutable {
-                                 if (ex) {
-                                     val["code"] = API::OtherFailed;
-                                     val["msg"] = ex.what();
-                                 } else {
-                                     val["data"]["key"] = key;
-                                     InfoL << "Publish success, please play with player:" << dst_url;
-                                 }
-                                 invoker(200, headerOut, val.toStyledString());
-                             });
+        EventPollerPool::Instance().getPoller(false)->async([=]() mutable {
+            addStreamPusherProxy(allArgs["schema"],
+                                 allArgs["vhost"],
+                                 allArgs["app"],
+                                 allArgs["stream"],
+                                 allArgs["dst_url"],
+                                 retry_count,
+                                 allArgs["rtp_type"],
+                                 allArgs["timeout_sec"],
+                                 args,
+                                 [invoker, val, headerOut, dst_url](const SockException &ex, const string &key) mutable {
+                                     if (ex) {
+                                         val["code"] = API::OtherFailed;
+                                         val["msg"] = ex.what();
+                                     } else {
+                                         val["data"]["key"] = key;
+                                         InfoL << "Publish success, please play with player:" << dst_url;
+                                     }
+                                     invoker(200, headerOut, val.toStyledString());
+                                 });
+        });
     });
 
     // 关闭推流代理  [AUTO-TRANSLATED:91602b75]
@@ -1256,22 +1267,24 @@ void installWebApi() {
             vhost = allArgs["vhost"];
         }
         auto tuple = MediaTuple { vhost, allArgs["app"], allArgs["stream"], "" };
-        addStreamProxy(tuple,
-                       allArgs["url"],
-                       retry_count,
-                       option,
-                       allArgs["rtp_type"],
-                       allArgs["timeout_sec"],
-                       args,
-                       [invoker,val,headerOut](const SockException &ex,const string &key) mutable{
-                           if (ex) {
-                               val["code"] = API::OtherFailed;
-                               val["msg"] = ex.what();
-                           } else {
-                               val["data"]["key"] = key;
-                           }
-                           invoker(200, headerOut, val.toStyledString());
-                       });
+        EventPollerPool::Instance().getPoller(false)->async([=]() mutable {
+            addStreamProxy(tuple,
+                           allArgs["url"],
+                           retry_count,
+                           option,
+                           allArgs["rtp_type"],
+                           allArgs["timeout_sec"],
+                           args,
+                           [invoker,val,headerOut](const SockException &ex,const string &key) mutable {
+                               if (ex) {
+                                   val["code"] = API::OtherFailed;
+                                   val["msg"] = ex.what();
+                               } else {
+                                   val["data"]["key"] = key;
+                               }
+                               invoker(200, headerOut, val.toStyledString());
+                           });
+        });
     });
 
     // 关闭拉流代理  [AUTO-TRANSLATED:5204f128]
@@ -1668,8 +1681,10 @@ void installWebApi() {
         CHECK(muxer, "get muxer from media source failed");
 
         src->getOwnerPoller()->async([=]() mutable {
-            muxer->forEachRtpSender([&](const std::string &ssrc) mutable {
+            muxer->forEachRtpSender([&](const std::string &ssrc, const RtpSender &sender) mutable {
                 val["data"].append(ssrc);
+                val["bytesSpeed"] = (Json::UInt64)sender.getSendSpeed();
+                val["totalBytes"] = (Json::UInt64)sender.getSendTotalBytes();
             });
             invoker(200, headerOut, val.toStyledString());
         });
@@ -2201,6 +2216,7 @@ void installWebApi() {
         // sample_ms设置为0，从配置文件加载；file_repeat可以指定，如果配置文件也指定循环解复用，那么强制开启  [AUTO-TRANSLATED:23e826b4]
         // sample_ms is set to 0, loaded from the configuration file; file_repeat can be specified, if the configuration file also specifies loop demultiplexing, then force it to be enabled
         reader->startReadMP4(0, true, allArgs["file_repeat"]);
+        val["data"]["duration_ms"] = (Json::UInt64)reader->getDemuxer()->getDurationMS();
     });
 #endif
 
